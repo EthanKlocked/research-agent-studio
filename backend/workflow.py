@@ -43,20 +43,23 @@ class WorkflowState(TypedDict):
     interpreted_request: str
     plan: list[str]
     evidence: list[dict]
+    unavailable_sources: list[dict]
     report: dict | None
     revisions: list[dict]
     evaluation: dict | None
     feedback: list[str]
     errors: list[str]
+    partial_result: dict | None
 
 def build_graph(settings, mode, scenario, publish):
     runner = RoleRunner(settings, mode, scenario)
 
     async def research(state):
         evidence = {e["id"]: e for e in state["evidence"]}
+        unavailable = {(s["document_id"], s["section_id"]): s for s in state.get("unavailable_sources", [])}
         failures = []
         search_hits = []
-        async with document_session(timeout=settings.mcp_timeout, max_tool_calls=settings.max_tool_calls, max_tool_corrections=settings.max_tool_corrections) as client:
+        async with document_session(timeout=settings.mcp_timeout, max_tool_calls=settings.max_tool_calls, max_tool_corrections=settings.max_tool_corrections, enabled=False if mode == "test" else None) as client:
             async def invoke_tool(name, args):
                 public_name = name if name in ("search_documents", "get_section") else "unknown"
                 await publish("tool_start", state, {"tool":public_name, "input_summary":tool_input_summary(name, args)})
@@ -71,6 +74,13 @@ def build_graph(settings, mode, scenario, publish):
                 if name == "search_documents":
                     search_hits.extend(result)
                 if name == "get_section":
+                    key = (args["document_id"], args["section_id"])
+                    if result.get("retrieval_status") == "unavailable":
+                        unavailable[key] = result
+                        state["unavailable_sources"] = list(unavailable.values())
+                        await publish("tool_complete", state, {"tool":name, "count":0, "retrieval_status":"unavailable"})
+                        return result
+                    unavailable.pop(key, None)
                     evidence[result["id"]] = result
                 await publish("tool_complete", state, {"tool":name, "count":len(result) if isinstance(result, list) else 1})
                 return result
@@ -95,10 +105,12 @@ def build_graph(settings, mode, scenario, publish):
                 raise ToolFailure("Document tool failed")
             if client.calls == 0:
                 raise ToolFailure("Researcher did not call a document tool")
+            if unavailable and not evidence:
+                raise ToolFailure("Optional sources unavailable and no evidence retrieved")
             if search_hits and not evidence:
                 raise RetrievalIncomplete("Search matched but no section was retrieved")
             ROLE_SCHEMAS["Researcher"].model_validate(output)
-        return {"evidence":list(evidence.values()), **({"status":"empty"} if not evidence else {})}
+        return {"evidence":list(evidence.values()), "unavailable_sources":list(unavailable.values()), **({"status":"empty"} if not evidence else {})}
 
     def node(role):
         async def execute(state):
@@ -114,6 +126,13 @@ def build_graph(settings, mode, scenario, publish):
                 value = ROLE_SCHEMAS[role].model_validate(raw).model_dump()
                 if role == "Reporter":
                     validate_citations(value, current["evidence"])
+                    # Reserve a bounded deterministic limitation even if the model
+                    # omits optional failures. These identifiers are never citations.
+                    sources = current.get("unavailable_sources", [])
+                    if sources:
+                        documents = sorted({s["document_id"] for s in sources})
+                        note = "공식 공개 자료 조회 불가: " + ", ".join(documents) + ". 해당 자료는 근거에서 제외했으며 조회된 자료 범위로만 작성했습니다."
+                        value["limitations"] = [note] + [s for s in value["limitations"] if s != note][:7]
                     updates = {"report":value}
                 elif role == "Evaluator":
                     updates = {"evaluation":value, "feedback":value["issues"] + value["follow_up"]}

@@ -139,7 +139,7 @@ async def test_cancel_real_mcp_lifecycle(phase, monkeypatch, mcp_processes):
 
 
 async def test_timeout_is_a_timeout_not_generic_model_error(mcp_processes):
-    manager = RunManager(Settings(test_mode=True, model_timeout=0.5))
+    manager = RunManager(Settings(test_mode=True, researcher_timeout=0.5))
     state = await manager.start(RunRequest(question="timeout", mode="test", scenario="timeout"))
     rid = state["run_id"]
     try:

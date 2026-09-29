@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import shutil
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,16 +10,35 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp_server.public_sources import CATALOG, PUBLIC_SECTION_IDS, UnavailableSource, public_sources_enabled
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {"search_documents", "get_section"}
 DATA = json.loads((ROOT / "data/apple_fy2024.json").read_text(encoding="utf-8"))
-SECTION_IDS = frozenset((s["document_id"], s["section_id"]) for s in DATA["sections"])
+SECTION_IDS = frozenset((s["document_id"], s["section_id"]) for s in DATA["sections"]) | PUBLIC_SECTION_IDS
 DATASET_SCOPE = {
     "name": DATA["name"], "as_of": DATA["as_of"], "scope": DATA["scope"],
     "period_note": "FY2024 Q4 is a completed historical quarter ending 2024-09-28. as_of is the reporting period end, not publication or knowledge cutoff. Use each document's published_at; these are reported results, not future estimates.",
     "available_documents": [{k:s[k] for k in ("document_id", "section_id", "title", "published_at")} for s in DATA["sections"]],
 }
+
+def get_dataset_scope(*, enabled=None):
+    """Resolve after dotenv loading; only enabled public metadata is discoverable."""
+    enabled = public_sources_enabled() if enabled is None else enabled
+    return {**DATASET_SCOPE, "public_sources_enabled": enabled,
+            "scope": DATA["scope"] + (" Exact official Apple FY2024 Q4 documents may be fetched on demand; catalog metadata is not evidence." if enabled else ""),
+            "available_documents": DATASET_SCOPE["available_documents"] +
+            ([{k: s[k] for k in ("document_id", "section_id", "title", "published_at", "url", "retrieval_status")} for s in CATALOG] if enabled else [])}
+
+def document_environment(*, enabled=None):
+    """Forward an explicit boolean and resolved parser path, never model secrets."""
+    env = {"PATH": os.defpath, "PYTHONIOENCODING": "utf-8", "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false"}
+    if public_sources_enabled() if enabled is None else enabled:
+        env["RESEARCH_PUBLIC_SOURCES"] = "1"
+        executable = shutil.which(os.environ.get("RESEARCH_PDFTOTEXT", "").strip() or "pdftotext")
+        if executable:
+            env["RESEARCH_PDFTOTEXT"] = str(Path(executable).resolve())
+    return env
 
 class ToolFailure(Exception):
     pass
@@ -85,6 +105,11 @@ class DocumentClient:
             else:
                 texts = [c.text for c in result.content if c.type == "text"]
                 value = json.loads(texts[0]) if len(texts) == 1 else [json.loads(t) for t in texts]
+            if isinstance(value, dict) and value.get("retrieval_status") == "unavailable":
+                unavailable = UnavailableSource.model_validate(value)
+                if name != "get_section" or (unavailable.document_id, unavailable.section_id) != (args["document_id"], args["section_id"]):
+                    raise ToolFailure("Invalid unavailable source result")
+                return unavailable.model_dump()
             if name == "get_section":
                 self.unresolved_error = False
             return value
@@ -94,9 +119,9 @@ class DocumentClient:
             raise ToolFailure("Document tool failed") from exc
 
 @asynccontextmanager
-async def document_session(timeout=10, max_tool_calls=12, max_tool_corrections=2):
+async def document_session(timeout=10, max_tool_calls=12, max_tool_corrections=2, *, enabled=None):
     # No model credentials, global config, or traces are forwarded to the child.
-    env = {"PATH": os.defpath, "PYTHONIOENCODING": "utf-8", "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false"}
+    env = document_environment(enabled=enabled)
     params = StdioServerParameters(command=sys.executable, args=["-m", "mcp_server.server"], cwd=str(ROOT), env=env)
     with open(os.devnull, "w", encoding="utf-8") as errlog:
         async with stdio_client(params, errlog=errlog) as (reader, writer):

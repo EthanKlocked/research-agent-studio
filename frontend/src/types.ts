@@ -64,6 +64,7 @@ export interface Snapshot {
   evaluation: Evaluation | null;
   feedback: string[];
   errors: string[];
+  partial_result?: { iteration: number; reason: "revision_failed" } | null;
 }
 export interface RunEvent {
   seq: number;

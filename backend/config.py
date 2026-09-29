@@ -1,5 +1,6 @@
 """Operator-only configuration; never serialized to the browser."""
 import os
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -9,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # Explicitly disable inherited tracing; no credential discovery or global dotenv.
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
+TIMEOUT_ENV = {"model_timeout": "LLM_REQUEST_TIMEOUT", "listener_timeout": "LISTENER_TIMEOUT", "planner_timeout": "PLANNER_TIMEOUT", "researcher_timeout": "RESEARCHER_TIMEOUT", "reporter_timeout": "REPORTER_TIMEOUT", "evaluator_timeout": "EVALUATOR_TIMEOUT", "run_timeout": "RUN_TIMEOUT"}
 
 @dataclass(frozen=True)
 class Settings:
@@ -25,10 +28,22 @@ class Settings:
     max_tool_corrections: int = 2
     mcp_timeout: float = 10
     model_timeout: float = 30
-    run_timeout: float = 120
+    listener_timeout: float = 60
+    planner_timeout: float = 60
+    researcher_timeout: float = 180
+    reporter_timeout: float = 60
+    evaluator_timeout: float = 60
+    run_timeout: float = 600
     max_output_tokens: int = 8192
 
+    def role_timeout(self, role):
+        return getattr(self, role.lower() + "_timeout")
+
     def __post_init__(self):
+        for field_name, env_name in TIMEOUT_ENV.items():
+            value = getattr(self, field_name)
+            if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= 7200:
+                raise ValueError(f"{env_name} must be finite seconds greater than 0 and at most 7200")
         if type(self.max_output_tokens) is not int or not 1 <= self.max_output_tokens <= 65536:
             raise ValueError("LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 65536")
 
@@ -51,4 +66,12 @@ class Settings:
             tokens = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "").strip() or "8192")
         except ValueError:
             raise ValueError("LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 65536") from None
-        return cls(max_output_tokens=tokens, provider=os.getenv("LLM_PROVIDER", "").strip(), model=os.getenv("LLM_MODEL", "").strip(), base_url=os.getenv("LLM_BASE_URL", "").strip(), api_key=os.getenv("LLM_API_KEY", "").strip(), test_mode=os.getenv("RESEARCH_TEST_MODE", "0") == "1")
+        timeouts = {}
+        for field_name, env_name in TIMEOUT_ENV.items():
+            raw = os.getenv(env_name, "").strip()
+            if raw:
+                try:
+                    timeouts[field_name] = float(raw)
+                except ValueError:
+                    raise ValueError(f"{env_name} must be finite seconds greater than 0 and at most 7200") from None
+        return cls(**timeouts, max_output_tokens=tokens, provider=os.getenv("LLM_PROVIDER", "").strip(), model=os.getenv("LLM_MODEL", "").strip(), base_url=os.getenv("LLM_BASE_URL", "").strip(), api_key=os.getenv("LLM_API_KEY", "").strip(), test_mode=os.getenv("RESEARCH_TEST_MODE", "0") == "1")

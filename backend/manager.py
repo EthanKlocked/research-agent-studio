@@ -1,7 +1,7 @@
 """Bounded process-local run snapshots and replay logs; not durable persistence."""
 import asyncio
 import logging
-from backend.errors import error_category
+from backend.errors import error_category, safe_exception_classes
 from backend.schemas import ROLE_SCHEMAS
 from collections import OrderedDict, deque
 from copy import deepcopy
@@ -29,14 +29,13 @@ class RunRecord:
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     cancel_requested: bool = False
     finalized: bool = False
+    validated_state: dict | None = None
 
 def safe_error(exc):
-    if isinstance(exc, BaseExceptionGroup):
-        messages = [safe_error(e) for e in exc.exceptions]
-        return next((m for m in messages if m != "실행 오류: 모델 응답 또는 출력 검증에 실패했습니다."), messages[0])
-    if isinstance(exc, TimeoutError):
+    category = error_category(exc)
+    if category == "timeout":
         return "실행 시간 제한에 도달했습니다. 요청 또는 모델 응답 시간이 초과되었습니다."
-    if isinstance(exc, ToolFailure):
+    if category in ("tool", "retrieval_incomplete"):
         return "자료 조회 도구가 실패했습니다. 근거 없음과는 다른 오류입니다."
     return "실행 오류: 모델 응답 또는 출력 검증에 실패했습니다."
 
@@ -57,6 +56,8 @@ class RunManager:
             if record.cancel_requested:
                 state = {**state, "status": "cancelled", "errors": []}
             record.finalized = True
+        if kind == "node_complete" and state.get("stage") == "Evaluator":
+            record.validated_state = deepcopy(state)
         seq = record.state["last_seq"] + 1
         record.state = deepcopy(state)
         record.state["last_seq"] = seq
@@ -80,7 +81,7 @@ class RunManager:
             self.runs.pop(old)
             self.tasks.pop(old)
         run_id = uuid4().hex
-        state = dict(run_id=run_id, question=request.question, mode=request.mode, status="queued", stage=None, iteration=0, started_at=now(), finished_at=None, last_seq=0, interpreted_request="", plan=[], evidence=[], report=None, revisions=[], evaluation=None, feedback=[], errors=[])
+        state = dict(run_id=run_id, question=request.question, mode=request.mode, status="queued", stage=None, iteration=0, started_at=now(), finished_at=None, last_seq=0, interpreted_request="", plan=[], evidence=[], unavailable_sources=[], report=None, revisions=[], evaluation=None, feedback=[], errors=[], partial_result=None)
         self.runs[run_id] = RunRecord(state, deque(maxlen=self.settings.max_events))
         self.tasks[run_id] = asyncio.create_task(self.execute(run_id, request))
         return self.snapshot(run_id)
@@ -107,8 +108,17 @@ class RunManager:
                 "retrieval_incomplete":"검색 결과는 있지만 본문 구간을 조회하지 않았습니다. 근거 없음과는 다른 오류입니다.",
             }
             message = messages.get(category, safe_error(exc))
-            logging.getLogger(__name__).warning("run_failed role=%s category=%s", role, category)
+            logging.getLogger(__name__).warning("run_failed role=%s category=%s classes=%s", role, category, safe_exception_classes(exc))
             state.update(status="error", errors=[f"[{role}/{category}] {message}"])
+            checkpoint = self.runs[run_id].validated_state
+            if checkpoint and not self.runs[run_id].cancel_requested:
+                previous = checkpoint["revisions"][-1]
+                state["report"] = deepcopy(previous["report"])
+                state["report"]["limitations"] = state["report"]["limitations"][:7] + ["후속 수정 실행이 실패하여 이전 검증 보고서를 보존했습니다. 평가 통과가 아니며 미해결 이슈가 남아 있습니다."]
+                state["evidence"] = deepcopy(checkpoint["evidence"])
+                state["evaluation"] = deepcopy(previous["evaluation"])
+                state["feedback"] = previous["evaluation"]["issues"] + previous["evaluation"]["follow_up"]
+                state["partial_result"] = {"iteration": previous["iteration"], "reason": "revision_failed"}
         state["finished_at"] = now()
         await self.emit(run_id, "terminal", state)
 
