@@ -7,6 +7,7 @@ from langchain_core.tools import tool
 from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
 from backend.agents import RoleRunner
+from backend.errors import RetrievalIncomplete
 from backend.mcp_client import (
     document_session, ToolFailure, RecoverableToolError,
     SearchArguments, SectionArguments, SECTION_IDS,
@@ -54,6 +55,7 @@ def build_graph(settings, mode, scenario, publish):
     async def research(state):
         evidence = {e["id"]: e for e in state["evidence"]}
         failures = []
+        search_hits = []
         async with document_session(timeout=settings.mcp_timeout, max_tool_calls=settings.max_tool_calls, max_tool_corrections=settings.max_tool_corrections) as client:
             async def invoke_tool(name, args):
                 public_name = name if name in ("search_documents", "get_section") else "unknown"
@@ -66,13 +68,15 @@ def build_graph(settings, mode, scenario, publish):
                 except Exception as exc:
                     failures.append(exc)
                     raise
+                if name == "search_documents":
+                    search_hits.extend(result)
                 if name == "get_section":
                     evidence[result["id"]] = result
                 await publish("tool_complete", state, {"tool":name, "count":len(result) if isinstance(result, list) else 1})
                 return result
             @tool(args_schema=SearchArguments)
             async def search_documents(query: str, limit: int = 5) -> list[dict]:
-                """Search the bundled historical summaries by keyword; query <=300 chars, limit 1..5."""
+                """Search historical summaries for metadata only; call get_section for evidence. query <=300 chars, limit 1..5."""
                 return await invoke_tool("search_documents", {"query":query, "limit":limit})
             @tool(args_schema=SectionArguments)
             async def get_section(document_id: str, section_id: str) -> dict:
@@ -91,6 +95,8 @@ def build_graph(settings, mode, scenario, publish):
                 raise ToolFailure("Document tool failed")
             if client.calls == 0:
                 raise ToolFailure("Researcher did not call a document tool")
+            if search_hits and not evidence:
+                raise RetrievalIncomplete("Search matched but no section was retrieved")
             ROLE_SCHEMAS["Researcher"].model_validate(output)
         return {"evidence":list(evidence.values()), **({"status":"empty"} if not evidence else {})}
 
