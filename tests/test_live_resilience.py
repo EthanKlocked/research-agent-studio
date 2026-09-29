@@ -22,7 +22,8 @@ def install_provider(monkeypatch, respond):
         body = json.loads(request.content)
         requests.append(body)
         message = respond(body)
-        return httpx.Response(200, json={"id":"mock", "object":"chat.completion", "created":0, "model":"mock-model", "choices":[{"index":0,"message":{"role":"assistant", **message},"finish_reason":"tool_calls" if message.get("tool_calls") else "stop"}]})
+        finish_reason = message.pop("_finish_reason", "tool_calls" if message.get("tool_calls") else "stop")
+        return httpx.Response(200, json={"id":"mock", "object":"chat.completion", "created":0, "model":"mock-model", "choices":[{"index":0,"message":{"role":"assistant", **message},"finish_reason":finish_reason}]})
     def model(**kwargs):
         kwargs["http_client"] = httpx.Client(transport=httpx.MockTransport(transport), trust_env=False)
         kwargs["http_async_client"] = httpx.AsyncClient(transport=httpx.MockTransport(transport), trust_env=False)
@@ -119,8 +120,8 @@ async def test_provider_real_stdio_fatal_failures(monkeypatch, failure):
 async def test_fenced_output_still_requires_schema_and_citations(monkeypatch, role, value):
     from backend.schemas import ROLE_SCHEMAS, validate_citations
     install_provider(monkeypatch, lambda _: {"content":"```json\n"+json.dumps(value)+"\n```"})
-    raw = await RoleRunner(Settings(**SETTINGS), "live", "pass").invoke(role, STATE, [])
     with pytest.raises(ValueError):
+        raw = await RoleRunner(Settings(**SETTINGS), "live", "pass").invoke(role, STATE, [])
         validated = ROLE_SCHEMAS[role].model_validate(raw).model_dump()
         validate_citations(validated, [])
 

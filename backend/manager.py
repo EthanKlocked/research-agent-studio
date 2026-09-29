@@ -1,5 +1,8 @@
 """Bounded process-local run snapshots and replay logs; not durable persistence."""
 import asyncio
+import logging
+from backend.errors import error_category
+from backend.schemas import ROLE_SCHEMAS
 from collections import OrderedDict, deque
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -96,7 +99,16 @@ class RunManager:
             state["status"] = "cancelled"
         except (Exception, BaseExceptionGroup) as exc:
             state = self.snapshot(run_id)
-            state.update(status="error", errors=[safe_error(exc)])
+            category = error_category(exc)
+            role = state.get("stage") if state.get("stage") in ROLE_SCHEMAS else "Workflow"
+            messages = {
+                "output_limit":"모델 출력 토큰 한도에 도달했습니다. 운영자의 출력 한도 설정을 확인하세요.",
+                "validation":"한 번의 보정 후에도 모델 JSON 또는 출력 스키마 검증에 실패했습니다.",
+                "retrieval_incomplete":"검색 결과는 있지만 본문 구간을 조회하지 않았습니다. 근거 없음과는 다른 오류입니다.",
+            }
+            message = messages.get(category, safe_error(exc))
+            logging.getLogger(__name__).warning("run_failed role=%s category=%s", role, category)
+            state.update(status="error", errors=[f"[{role}/{category}] {message}"])
         state["finished_at"] = now()
         await self.emit(run_id, "terminal", state)
 

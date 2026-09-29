@@ -26,6 +26,11 @@ class Settings:
     mcp_timeout: float = 10
     model_timeout: float = 30
     run_timeout: float = 120
+    max_output_tokens: int = 8192
+
+    def __post_init__(self):
+        if type(self.max_output_tokens) is not int or not 1 <= self.max_output_tokens <= 65536:
+            raise ValueError("LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 65536")
 
     @property
     def configured(self):
@@ -42,4 +47,8 @@ class Settings:
         load_dotenv(ROOT / ".env", override=False)
         os.environ["LANGSMITH_TRACING"] = "false"
         os.environ["LANGCHAIN_TRACING_V2"] = "false"
-        return cls(provider=os.getenv("LLM_PROVIDER", "").strip(), model=os.getenv("LLM_MODEL", "").strip(), base_url=os.getenv("LLM_BASE_URL", "").strip(), api_key=os.getenv("LLM_API_KEY", "").strip(), test_mode=os.getenv("RESEARCH_TEST_MODE", "0") == "1")
+        try:
+            tokens = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "").strip() or "8192")
+        except ValueError:
+            raise ValueError("LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 65536") from None
+        return cls(max_output_tokens=tokens, provider=os.getenv("LLM_PROVIDER", "").strip(), model=os.getenv("LLM_MODEL", "").strip(), base_url=os.getenv("LLM_BASE_URL", "").strip(), api_key=os.getenv("LLM_API_KEY", "").strip(), test_mode=os.getenv("RESEARCH_TEST_MODE", "0") == "1")

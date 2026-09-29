@@ -12,10 +12,13 @@ from mcp.client.stdio import stdio_client
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {"search_documents", "get_section"}
-SECTION_IDS = frozenset(
-    (s["document_id"], s["section_id"])
-    for s in json.loads((ROOT / "data/apple_fy2024.json").read_text(encoding="utf-8"))["sections"]
-)
+DATA = json.loads((ROOT / "data/apple_fy2024.json").read_text(encoding="utf-8"))
+SECTION_IDS = frozenset((s["document_id"], s["section_id"]) for s in DATA["sections"])
+DATASET_SCOPE = {
+    "name": DATA["name"], "as_of": DATA["as_of"], "scope": DATA["scope"],
+    "period_note": "FY2024 Q4 is a completed historical quarter ending 2024-09-28. as_of is the reporting period end, not publication or knowledge cutoff. Use each document's published_at; these are reported results, not future estimates.",
+    "available_documents": [{k:s[k] for k in ("document_id", "section_id", "title", "published_at")} for s in DATA["sections"]],
+}
 
 class ToolFailure(Exception):
     pass

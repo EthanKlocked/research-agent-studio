@@ -14,10 +14,10 @@ def public(section):
 
 @mcp.tool()
 def search_documents(query: Annotated[str, Field(min_length=1, max_length=300)], limit: Annotated[int, Field(ge=1, le=5)] = 5) -> list[dict]:
-    """Search only the bundled historical summaries, returning at most five sections."""
+    """Search bundled historical summaries; return at most five metadata hits, not excerpts. Call get_section to retrieve evidence."""
     tokens = query.casefold().split()
     scored = [(sum(t in (s["title"] + s["excerpt"] + s["keywords"]).casefold() for t in tokens), s) for s in SECTIONS.values()]
-    return [public(s) for score, s in sorted(scored, key=lambda pair: -pair[0]) if score][:limit]
+    return [{k:v for k,v in public(s).items() if k != "excerpt"} for score, s in sorted(scored, key=lambda pair: -pair[0]) if score][:limit]
 
 @mcp.tool()
 def get_section(document_id: Annotated[str, Field(min_length=1, max_length=80)], section_id: Annotated[str, Field(min_length=1, max_length=80)]) -> dict:
