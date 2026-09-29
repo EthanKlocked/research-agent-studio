@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from langsmith import tracing_context
 from backend.workflow import build_graph
-from backend.mcp_client import ToolFailure
+from backend.mcp_client import ToolFailure, document_session
 
 TERMINAL = {"success", "limit_reached", "empty", "error", "cancelled"}
 
@@ -91,9 +91,19 @@ class RunManager:
             await self.emit(run_id, kind, state, data)
         try:
             with tracing_context(enabled=False):
-                graph = build_graph(self.settings, request.mode, request.scenario, publish)
                 async with asyncio.timeout(self.settings.run_timeout):
-                    result = await graph.ainvoke(self.snapshot(run_id), config={"recursion_limit":32, "callbacks":[]})
+                    if request.mode == "live" and self.settings.general_web_enabled:
+                        # Own the AnyIO/MCP lifetime in this task, around the entire
+                        # graph, not across node tasks. Discovery never closes it.
+                        async with document_session(timeout=self.settings.mcp_timeout,
+                                max_tool_calls=self.settings.max_tool_calls,
+                                max_tool_corrections=self.settings.max_tool_corrections,
+                                search_provider="exa", exa_api_key=self.settings.exa_api_key) as client:
+                            graph = build_graph(self.settings, request.mode, request.scenario, publish, persistent_client=client)
+                            result = await graph.ainvoke(self.snapshot(run_id), config={"recursion_limit":32, "callbacks":[]})
+                    else:
+                        graph = build_graph(self.settings, request.mode, request.scenario, publish)
+                        result = await graph.ainvoke(self.snapshot(run_id), config={"recursion_limit":32, "callbacks":[]})
             state = result
         except asyncio.CancelledError:
             state = self.snapshot(run_id)

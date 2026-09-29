@@ -1,6 +1,26 @@
 # Verification scope
 
-## Executed on macOS
+## General web and dashboard verification
+
+Frontend capability-contract TDD: three new regressions first failed on missing capability/offline labels, then passed. The final frontend suite passes **56 tests across 4 files**; `npm --prefix frontend run typecheck` and `npm --prefix frontend run build` also pass on macOS. Checks cover Exa configured versus actual offline test execution, live-model configuration without general web, observed web tool labels not implying availability, and nullable dataset dates. Existing dashboard coverage includes granular model/validation/repair progress, terminal lifecycle, evidence dates/provenance, reconnect and retained reports.
+
+General-web backend tests use injected Exa HTTP responses, mock model-provider responses and real local MCP/graph paths. They cover search-versus-evidence separation, run-local IDs, immutable reads, request limits, quota/auth failures and offline test isolation. **These are mock/protocol checks, not live Exa or live LLM validation.** They do not establish account credit balance, billing safety, external service availability or report truth. The frontend checks above use mocked API/SSE data, not a new browser or Windows run. Historical suite counts and browser results below describe earlier verification stages, not new Exa validation.
+
+Final local `bash scripts/test.sh`: **333 Python tests and 56 frontend tests passed**, with production build and separate TypeScript check. Async-provider regressions verify an absolute deadline around headers and streamed bytes, plus active cancellation and stream/client cleanup. Independent backend and frontend reviews passed after fixes for the slow-drip deadline, retained-report identity and generic tool-error labeling.
+
+A separate browser smoke used the actual local API/graph/MCP/SSE with deterministic test responses: two research iterations completed, four sources and two reviewed revisions survived snapshot restoration, and 390/768/1440px layouts had no horizontal overflow. Initial inspection encountered stale browser-only fixture interception; it was discarded and these observations were made in a fresh isolated context. Browser contexts and the temporary server were closed. This was not live Exa/LLM or Windows verification.
+
+Reproduce local automated checks:
+
+```bash
+npm --prefix frontend test
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+```
+
+An operator-authorized live Exa smoke remains separate: check no card/no purchase and auto recharge OFF in the account first, configure only local credentials, then inspect search/read evidence, dates, source links and account usage. A zero recharge limit may mean unlimited; local caps cannot enforce free-credit-only use. Do not send private questions or URLs. No live request, credential inspection or account change was performed for this frontend/documentation verification.
+
+## Earlier verification on macOS
 
 - Locked Python install and clean npm install; TypeScript check and production build passed.
 - Python suite: 221 passing tests, including 11 static PowerShell-launcher contract tests. Core tests include actual LangGraph/LangChain execution and real MCP stdio initialization, discovery, search and section retrieval.
@@ -47,7 +67,7 @@ Subsequent user-reported live API checks reached Gemini 2.5-family responses and
 
 After operator-local settings, verify provider authentication, model tool calls and JSON output, claim/evidence agreement, natural revise behavior and provider cancellation behavior. The real workflow may pass on its first evaluation. Explicit test scenarios must not be represented as real model judgment.
 
-The corpus is small and historical, not live web research. Run state is in memory only. This is a loopback single-user prototype, not an internet-facing service.
+The default corpus and offline test scenario are small and historical. General public web research requires explicit Exa configuration in live mode; its authentication, current provider behavior, cost and quality still require operator-local validation. Run state is in memory only. This is a loopback single-user prototype, not an internet-facing service.
 
 ## Screenshots
 

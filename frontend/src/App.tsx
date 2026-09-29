@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { request } from "./api";
 import { isComplete, safeUrl } from "./state";
 import { useRun } from "./useRun";
-import type { Config, Report, RunEvent, Stage } from "./types";
+import type { Config, Report, Stage } from "./types";
+import { Timeline } from "./Timeline";
 const stages: { id: Stage; label: string; active: string }[] = [
   { id: "Listener", label: "요청 해석", active: "요청 해석 중" },
   { id: "Planner", label: "조사 계획", active: "조사 계획 중" },
@@ -19,16 +20,6 @@ const statusText = {
   error: "조사 중 오류가 발생했습니다",
   cancelled: "실행이 중단되었습니다",
 };
-const eventLabels: Record<string, string> = {
-  node_start: "단계 시작",
-  node_complete: "단계 완료",
-  tool_start: "도구 호출",
-  tool_complete: "도구 완료",
-  tool_error: "도구 입력 오류",
-  evaluation: "결과 평가",
-  branch: "분기 결정",
-  terminal: "실행 종료",
-};
 function List({ items, empty }: { items: string[]; empty: string }) {
   return items.length ? (
     <ul className="text-list">
@@ -39,6 +30,9 @@ function List({ items, empty }: { items: string[]; empty: string }) {
   ) : (
     <p className="muted small">{empty}</p>
   );
+}
+function evidenceDate(value?: string | null) {
+  return value && Number.isFinite(Date.parse(value)) ? value : "미확인";
 }
 function elapsed(start?: string, end?: string | null) {
   if (!start) return "—";
@@ -95,32 +89,20 @@ function ReportBody({
     </>
   );
 }
-function safeEvent(event: RunEvent) {
-  const d = event.data;
-  return [
-    eventLabels[event.type] ?? "상태 갱신",
-    d.tool_name || d.tool,
-    d.input_summary,
-    typeof d.count === "number" ? `결과 ${d.count}건` : null,
-    (d.state_fields || d.changed_fields)?.join(", "),
-    d.reason,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
 export default function App() {
   const [config, setConfig] = useState<Config | null>(null),
     [configError, setConfigError] = useState(""),
     [question, setQuestion] = useState(""),
     [mode, setMode] = useState<"test" | "live">("test"),
     [scenario, setScenario] = useState("revise"),
+    [view, setView] = useState<"report" | "sources" | "history">("report"),
     [revision, setRevision] = useState<number | null>(null),
     [source, setSource] = useState<string | null>(null),
     [, tick] = useState(0);
   const sourcePanel = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (source) sourcePanel.current?.focus();
-  }, [source]);
+    if (source && view === "sources") sourcePanel.current?.focus();
+  }, [source, view]);
   const run = useRun(),
     s = run.snapshot;
   const active = !!s && !isComplete(s),
@@ -147,6 +129,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [active]);
   useEffect(() => {
+    setView("report");
     setRevision(null);
     setSource(null);
     if (s?.question) setQuestion(s.question);
@@ -154,15 +137,18 @@ export default function App() {
   const revisions = s?.revisions ?? [],
     selected =
       revision === null
-        ? revisions.at(-1)
+        ? (s?.partial_result
+            ? revisions.find((r) => r.iteration === s.partial_result?.iteration)
+            : JSON.stringify(s?.report) === JSON.stringify(revisions.at(-1)?.report) ? revisions.at(-1) : undefined)
         : revisions.find((r) => r.iteration === revision),
-    report = selected?.report ?? s?.report;
+    report = revision === null ? s?.report ?? selected?.report : selected?.report ?? s?.report;
   const previous = selected
     ? revisions.filter((r) => r.iteration < selected.iteration).at(-1)
     : undefined;
   const evidence = s?.evidence.find((e) => e.id === source);
   const evidenceUrl = evidence ? safeUrl(evidence.url) : null;
   const actualMode = s?.mode ?? mode;
+  const generalWeb = config?.capabilities?.general_web === true && config.capabilities.search_provider === "exa";
   const tools = run.events.filter(
     (e) => e.type === "tool_start" || e.type === "tool_complete" || e.type === "tool_error",
   );
@@ -172,8 +158,17 @@ export default function App() {
       ? statusText[s.status]
       : "질문을 기다리고 있습니다";
   return (
-    <div className="app-shell">
-      <a className="skip-link" href="#report">
+    <div className="app-shell dashboard" data-motion={active && !run.disconnected ? "active" : "paused"}>
+      <aside className="workspace-sidebar" aria-label="작업 공간">
+        <div className="sidebar-brand">Research Studio</div>
+        <p className="sidebar-label">WORKSPACE</p>
+        <a href="#question">리서치 질문</a>
+        <a href="#research-views">결과와 수집 자료</a>
+        <p className="sidebar-label">현재 실행</p>
+        <p className="small">{s?.question || "새 질문을 입력해 주세요."}</p>
+        <p className="sidebar-boundary">로컬 워크스페이스<br/>실행 기록은 메모리에 유지됩니다.</p>
+      </aside>
+      <a className="skip-link" href="#report" onClick={() => setView("report")}>
         보고서로 건너뛰기
       </a>
       <header className="topbar">
@@ -193,10 +188,7 @@ export default function App() {
       <main>
         <section className="intro">
           <div>
-            <p className="eyebrow">EVIDENCE-LED RESEARCH</p>
-            <h1>
-              질문에서 근거까지, <span>하나의 흐름으로.</span>
-            </h1>
+            <h1>리서치 워크스페이스</h1>
             <p className="intro-copy">
               계획하고, 조사하고, 검토합니다. 결과는 출처와 함께 확인하세요.
             </p>
@@ -205,7 +197,7 @@ export default function App() {
             <span className="eyebrow">DATASET</span>
             <strong>{config?.dataset.name ?? "데이터 정보 확인 중"}</strong>
             <span>
-              자료 기준일 <b>{config?.dataset.as_of ?? "—"}</b>
+              자료 기준일 <b>{config ? evidenceDate(config.dataset.as_of) : "—"}</b>
             </span>
           </div>
         </section>
@@ -300,11 +292,18 @@ export default function App() {
               </div>
               <span className="mode-notice">
                 {actualMode === "test"
-                  ? "테스트 모드 / 실제 모델 호출 없음"
-                  : "실제 모델 모드 · 로컬 운영자 설정 사용"}
+                  ? "테스트 모드 · 오프라인 고정 자료 / 실제 모델·웹 호출 없음"
+                  : generalWeb
+                    ? "실제 모델 모드 · 일반 웹 검색 사용 (Exa)"
+                    : "실제 모델 모드 · 제한된 자료 범위 / 일반 웹 검색 없음"}
               </span>
             </div>
           </form>
+          <p className="small muted" aria-label="검색 기능 설정">
+            {!config ? "일반 웹 검색 · 설정 확인 중" : generalWeb
+              ? "일반 웹 검색 · Exa 설정됨 (연결·잔액 미검증)"
+              : "일반 웹 검색 · 미설정"}
+          </p>
         </section>
         {(configError || run.error) && (
           <div role="alert" className="error-banner">
@@ -334,9 +333,10 @@ export default function App() {
               연결 복구 중 · 서버의 최신 상태를 다시 확인합니다.
             </p>
           )}
+          {s && <p className="run-id small muted" style={{ overflowWrap: "anywhere" }}>실행 ID: {s.run_id}</p>}
           <ol className="stages">
             {stages.map((stage, i) => {
-              const current = s?.stage === stage.id;
+              const current = active && s?.stage === stage.id;
               return (
                 <li
                   key={stage.id}
@@ -369,7 +369,13 @@ export default function App() {
             )}
           </div>
         </section>
+        <nav id="research-views" className="view-tabs" aria-label="리서치 보기">
+          <button aria-label="보고서 보기" aria-pressed={view === "report"} onClick={() => setView("report")}>보고서</button>
+          <button aria-label="수집 자료 보기" aria-pressed={view === "sources"} onClick={() => setView("sources")}>수집 자료 <span>{s?.evidence.length ?? 0}</span></button>
+          <button aria-label="수정 기록 보기" aria-pressed={view === "history"} onClick={() => setView("history")}>수정 기록 <span>{revisions.length}</span></button>
+        </nav>
         <div className="workspace">
+          <Timeline events={run.events} complete={!!s && isComplete(s)} lastSeq={s?.last_seq ?? 0} />
           <section
             id="report"
             className="report-panel"
@@ -378,7 +384,7 @@ export default function App() {
           >
             <div className="panel-top">
               <div>
-                <span className="eyebrow">RESEARCH REPORT</span>
+                <span className="eyebrow">RESEARCH RESULT</span>
                 <h2>리서치 보고서</h2>
               </div>
               {revisions.length > 0 ? (
@@ -386,12 +392,13 @@ export default function App() {
                   버전{" "}
                   <select
                     aria-label="보고서 버전"
-                    value={selected?.iteration ?? ""}
+                    value={revision ?? "latest"}
                     onChange={(e) => {
-                      setRevision(Number(e.target.value));
+                      setRevision(e.target.value === "latest" ? null : Number(e.target.value));
                       setSource(null);
                     }}
                   >
+                    <option value="latest">현재 보고서</option>
                     {revisions.map((r) => (
                       <option value={r.iteration} key={r.iteration}>
                         {r.iteration}차 보고서
@@ -410,12 +417,13 @@ export default function App() {
                 <p>보존된 보고서: {s.partial_result.iteration}차 보고서</p>
               </div>
             )}
+            <div hidden={view !== "report"}>
             {report ? (
               <div className="report-content">
                 <div className="report-kicker">
                   {selected
                     ? `${selected.iteration}차 검토본`
-                    : "작성 중인 보고서"}{" "}
+                    : "평가 전 초안"}{" "}
                   <span>
                     {actualMode === "test"
                       ? "테스트 실행 결과"
@@ -424,7 +432,7 @@ export default function App() {
                 </div>
                 <ReportBody
                   report={report}
-                  onCitation={(id) => setSource(id)}
+                  onCitation={(id) => { setView("sources"); setSource(id); }}
                 />
                 {selected && (
                   <div className="revision-evidence">
@@ -436,7 +444,7 @@ export default function App() {
                         <button
                           key={id}
                           className="citation"
-                          onClick={() => setSource(id)}
+                          onClick={() => { setView("sources"); setSource(id); }}
                         >
                           ↗ {id}
                         </button>
@@ -497,6 +505,7 @@ export default function App() {
                 </div>
               </div>
             )}
+            </div>
             {s?.status === "limit_reached" && (
               <div className="limit-banner">
                 최대 반복 횟수에 도달했습니다. 남아 있는 평가 이슈와 보고서의
@@ -508,7 +517,8 @@ export default function App() {
                 <List items={s.errors} empty="" />
               </div>
             ) : null}
-            <section className="sources">
+            <section className="sources" hidden={view === "history"}>
+              {view === "sources" && <p className="small muted">검색 결과는 인용 근거가 아닙니다. 실제 조회되어 반영된 근거만 표시합니다.</p>}
               <div className="section-heading">
                 <h3>근거 자료</h3>
                 <span>{s?.evidence.length ?? 0}건</span>
@@ -518,7 +528,7 @@ export default function App() {
                   {s.evidence.map((e) => (
                     <button
                       key={e.id}
-                      onClick={() => setSource(e.id)}
+                      onClick={() => { setView("sources"); setSource(e.id); }}
                       aria-pressed={source === e.id}
                     >
                       <span>{e.id}</span>
@@ -531,6 +541,10 @@ export default function App() {
                   조회된 출처와 인용 구간이 여기에 표시됩니다.
                 </p>
               )}
+              {!!s?.unavailable_sources?.length && <section className="limitations">
+                <h3>이용 불가 자료 · 인용 제외</h3>
+                <List items={s.unavailable_sources.map(item => `${item.document_id} / ${item.section_id}`)} empty="" />
+              </section>}
               {source && !evidence && (
                 <p role="alert">이 인용에 연결된 근거를 찾을 수 없습니다.</p>
               )}
@@ -551,9 +565,10 @@ export default function App() {
                     </button>
                   </div>
                   <p className="source-dates">
-                    게시일 {evidence.published_at}{" "}
-                    <span>자료 기준일 {evidence.as_of}</span>
+                    게시일 {evidenceDate(evidence.published_at)}{" "}
+                    <span>자료 기준일 {evidenceDate(evidence.as_of)}</span>
                   </p>
+                  {evidence.provenance && <p className="small muted">수집 경로: {evidence.provenance}</p>}
                   <blockquote>{evidence.excerpt}</blockquote>
                   <div className="source-bottom">
                     <small>
@@ -575,6 +590,18 @@ export default function App() {
                 </article>
               )}
             </section>
+            {view === "history" && <section className="revision-history" aria-label="수정 기록">
+              <h3>수정 기록</h3>
+              {!revisions.length && <p className="muted small">아직 완료된 검토 기록이 없습니다.</p>}
+              {revisions.map(r => <article key={r.iteration}>
+                <h4>{r.iteration}차 검토 · {r.evaluation.decision === "pass" ? "통과" : "수정 필요"}</h4>
+                <p className="small">{r.report.title}</p>
+                <List items={r.evaluation.issues} empty="보완 요청 없음" />
+                <List items={r.evaluation.follow_up} empty="후속 조사 항목 없음" />
+                <p className="small">근거 {r.evidence_ids.length}건 · 추가 {r.added_evidence_ids.length}건</p>
+                <button className="citation" onClick={() => { setRevision(r.iteration); setView("report"); }}>이 버전 읽기</button>
+              </article>)}
+            </section>}
           </section>
           <aside className="work-panel" aria-label="작업 노트">
             <div className="panel-top">
@@ -620,7 +647,7 @@ export default function App() {
                         {e.data.input_summary && <small>{e.data.input_summary}</small>}
                         <small>
                           {e.type === "tool_error"
-                            ? "도구 입력 오류"
+                            ? "도구 오류"
                             : e.type === "tool_complete"
                               ? "조회 완료"
                               : "호출 시작"}
@@ -678,8 +705,9 @@ export default function App() {
                 </details>
               )}
             </section>
+            <p className="work-boundary">현재 관측된 도구: {[...new Set(tools.map(e => e.data.tool_name || e.data.tool).filter(Boolean))].join(", ") || "아직 없음"}. 전체 사용 가능 목록이 아닙니다.</p>
             <p className="work-boundary">
-              명시적인 계획과 결과만 표시합니다.
+              명시적인 계획과 결과만 표시합니다. 본문 토큰 스트림을 제공하지 않습니다.
               <br />
               모델 내부 추론은 노출하지 않습니다.
             </p>
@@ -693,24 +721,10 @@ export default function App() {
             </span>
           </summary>
           <p className="muted small">
-            현재 연결에서 수신한 안전한 이벤트 요약입니다. 최대 150건만
+            실행 이벤트와 State 변경 내역은 작업 타임라인에서 확인하세요. 최대 150건만
             표시합니다.
           </p>
-          {run.events.length ? (
-            <ol className="event-log">
-              {run.events.map((event) => (
-                <li key={event.seq}>
-                  <code>#{event.seq}</code>
-                  <span>{safeEvent(event)}</span>
-                  <time>
-                    {new Date(event.timestamp).toLocaleTimeString("ko-KR")}
-                  </time>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="muted small">아직 수신한 이벤트가 없습니다.</p>
-          )}
+
           <div className="state-fields">
             <span>공통 State</span>
             <code>

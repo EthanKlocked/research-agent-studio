@@ -28,6 +28,16 @@ def test_events_terminal_and_snapshot_recovery():
         response = c.get(f"/api/runs/{rid}/events?after=0")
         events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
         assert events[-1]["type"] == "terminal"
+        assert sum(e["type"] == "terminal" for e in events) == 1
+        assert {"model_start", "model_complete", "validation_start", "validation_complete", "discovery_start", "discovery_complete"} <= {e["type"] for e in events}
+        # Provisional evaluator success must not hide branch/terminal delivery.
+        success = next(i for i,e in enumerate(events) if e["data"]["snapshot"]["status"] == "success")
+        assert not events[success]["data"]["snapshot"]["finished_at"]
+        assert any(e["type"] == "branch" for e in events[success + 1:])
+        cursor = next(e["seq"] for e in events if e["type"] == "model_start")
+        replay = c.get(f"/api/runs/{rid}/events?after={cursor}")
+        replayed = [json.loads(line[6:]) for line in replay.text.splitlines() if line.startswith("data: ")]
+        assert replayed == [e for e in events if e["seq"] > cursor]
         assert all("snapshot" in e["data"] for e in events)
         snapshot = c.get(f"/api/runs/{rid}").json()
         assert snapshot == events[-1]["data"]["snapshot"]

@@ -19,6 +19,8 @@ class Settings:
     model: str = field(default="", repr=False)
     base_url: str = field(default="", repr=False)
     api_key: str = field(default="", repr=False)
+    search_provider: str = field(default="", repr=False)
+    exa_api_key: str = field(default="", repr=False)
     test_mode: bool = False
     max_iterations: int = 2
     max_concurrent: int = 2
@@ -48,6 +50,10 @@ class Settings:
             raise ValueError("LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 65536")
 
     @property
+    def general_web_enabled(self):
+        return self.search_provider == "exa" and bool(self.exa_api_key.strip())
+
+    @property
     def configured(self):
         try:
             url = urlsplit(self.base_url)
@@ -74,4 +80,4 @@ class Settings:
                     timeouts[field_name] = float(raw)
                 except ValueError:
                     raise ValueError(f"{env_name} must be finite seconds greater than 0 and at most 7200") from None
-        return cls(**timeouts, max_output_tokens=tokens, provider=os.getenv("LLM_PROVIDER", "").strip(), model=os.getenv("LLM_MODEL", "").strip(), base_url=os.getenv("LLM_BASE_URL", "").strip(), api_key=os.getenv("LLM_API_KEY", "").strip(), test_mode=os.getenv("RESEARCH_TEST_MODE", "0") == "1")
+        return cls(**timeouts, search_provider=os.getenv("SEARCH_PROVIDER", "").strip(), exa_api_key=os.getenv("EXA_API_KEY", "").strip(), max_output_tokens=tokens, provider=os.getenv("LLM_PROVIDER", "").strip(), model=os.getenv("LLM_MODEL", "").strip(), base_url=os.getenv("LLM_BASE_URL", "").strip(), api_key=os.getenv("LLM_API_KEY", "").strip(), test_mode=os.getenv("RESEARCH_TEST_MODE", "0") == "1")

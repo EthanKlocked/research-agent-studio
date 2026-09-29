@@ -141,6 +141,11 @@ async def test_cancel_real_mcp_lifecycle(phase, monkeypatch, mcp_processes):
         await asyncio.wait_for(manager.cancel(rid), 15)
         await assert_reaped(mcp_processes)
         assert_cancelled(manager, rid)
+        events = list(manager.runs[rid].events)
+        if phase in ("startup", "discovery", "cleanup_error"):
+            assert not any(e["type"] == "model_start" and e["data"]["role"] == "Planner" for e in events)
+            assert not any(e["type"] in ("discovery_complete", "tool_start") for e in events)
+        assert events[-1]["type"] == "terminal"
         before = manager.snapshot(rid)
         assert await manager.cancel(rid) == before
     finally:

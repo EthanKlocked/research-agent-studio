@@ -11,11 +11,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from backend.config import Settings, ROOT
 from backend.manager import RunManager, RunRejected, TERMINAL
 from backend.schemas import RunRequest
+from mcp_server.dataset import general_dataset_scope
 
 def create_app(settings=None, frontend_dir=None):
     settings = settings or Settings.from_env()
     manager = RunManager(settings)
-    dataset = json.loads((ROOT / "data/apple_fy2024.json").read_text(encoding="utf-8"))
+    dataset = general_dataset_scope() if settings.general_web_enabled else json.loads((ROOT / "data/apple_fy2024.json").read_text(encoding="utf-8"))
     dist = Path(frontend_dir) if frontend_dir else ROOT / "frontend/dist"
 
     @asynccontextmanager
@@ -62,7 +63,7 @@ def create_app(settings=None, frontend_dir=None):
 
     @app.get("/api/config")
     async def config():
-        return {"configured":settings.configured, "test_mode_available":settings.test_mode, "dataset":{k:dataset[k] for k in ("name", "as_of")}, "limits":{"max_iterations":settings.max_iterations}}
+        return {"configured":settings.configured, "test_mode_available":settings.test_mode, "capabilities":{"general_web":settings.general_web_enabled, "search_provider":"exa" if settings.general_web_enabled else None}, "dataset":{k:dataset[k] for k in ("name", "as_of")}, "limits":{"max_iterations":settings.max_iterations}}
 
     @app.post("/api/runs", status_code=202)
     async def start(body: RunRequest):

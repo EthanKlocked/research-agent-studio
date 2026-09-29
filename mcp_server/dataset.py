@@ -13,6 +13,17 @@ DATASET_SCOPE = {
     "available_documents": [{k:s[k] for k in ("document_id", "section_id", "title", "published_at")} for s in DATA["sections"]],
 }
 
+def general_dataset_scope(*, enabled=None):
+    historical = get_dataset_scope(enabled=enabled)
+    return {"name": "General public web research + historical document catalog",
+            "as_of": None,
+            "scope": "General topics through Exa search and extracted pages. Search metadata is not evidence. Coverage is not exhaustive; no guaranteed freshness or date range.",
+            "period_note": "No global as-of date. published_at is nullable source publication metadata, not a verified fact date or knowledge cutoff; never infer a date when absent.",
+            "general_web_enabled": True,
+            "public_sources_enabled": historical["public_sources_enabled"],
+            "available_documents": historical["available_documents"]}
+
+
 def get_dataset_scope(*, enabled=None):
     """Resolve after dotenv loading; only enabled public metadata is discoverable."""
     enabled = public_sources_enabled() if enabled is None else enabled

@@ -1,7 +1,8 @@
 """Read-only allowlisted data tools. No arbitrary paths, URLs, shell or SQL."""
 import asyncio
+import os
 from mcp_server.dataset import DATA, SECTIONS
-from mcp_server.tool_schemas import SearchQuery, SearchLimit, SectionIdentifier, DEFAULT_SEARCH_LIMIT
+from mcp_server.tool_schemas import SearchQuery, SearchLimit, SectionIdentifier, SourceIdentifier, DEFAULT_SEARCH_LIMIT
 from mcp.server.fastmcp import FastMCP
 from mcp_server.public_sources import CATALOG, PUBLIC_SECTION_IDS, PublicSourceStore, PublicSourceError, PublicSourceSecurityError, UnavailableSource, public_sources_enabled
 
@@ -40,5 +41,39 @@ async def get_section_tool(document_id: SectionIdentifier, section_id: SectionId
     """Fetch one exact allowlisted section; optional unavailable results are not evidence."""
     return await asyncio.to_thread(get_section, document_id, section_id)
 
+def register_general_tools(server, store):
+    """Register only on an explicitly configured, run-local server instance."""
+    @server.tool(name="web_search")
+    async def web_search(query: SearchQuery, limit: SearchLimit = DEFAULT_SEARCH_LIMIT) -> list[dict]:
+        """Search general public topics via Exa. Returns metadata and run-local source IDs, never evidence. Use read_page for contents. No fallback."""
+        return await store.web_search(query, limit)
+
+    @server.tool(name="read_page")
+    async def read_page(source_id: SourceIdentifier) -> dict:
+        """Retrieve extracted page evidence for an exact source_id from this run's web_search. URLs and unknown IDs are forbidden. Dates may be unknown."""
+        value = await store.read_page(source_id)
+        if not store.validate_evidence(value):
+            raise ValueError("Invalid retrieved evidence")
+        return value
+
+
+async def _main():
+    from mcp_server.general_web import GeneralWebStore
+    store = None
+    try:
+        if os.environ.get("SEARCH_PROVIDER", "").strip() == "exa" and os.environ.get("EXA_API_KEY", "").strip():
+            store = GeneralWebStore(api_key=os.environ["EXA_API_KEY"])
+            register_general_tools(mcp, store)
+        await mcp.run_stdio_async()
+    finally:
+        if store is not None:
+            await store.close()
+
+
+
+def main():
+    asyncio.run(_main())
+
+
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    main()
