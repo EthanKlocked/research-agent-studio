@@ -15,12 +15,14 @@ from backend.mcp_client import (
     SECTION_IDS, planner_tool_metadata,
 )
 from backend.schemas import ROLE_SCHEMAS, validate_citations
+from mcp_server.tool_schemas import ARGUMENT_SCHEMAS
 
 
 def tool_input_summary(name, arguments):
     """Public metadata only: never echo arbitrary model-authored arguments."""
     if name in ("search_documents", "web_search"):
-        query, limit = arguments.get("query"), arguments.get("limit")
+        query = arguments.get("query")
+        limit = arguments.get("limit", ARGUMENT_SCHEMAS[name].model_fields["limit"].default)
         length = len(query) if isinstance(query, str) else 0
         cap = str(limit) if type(limit) is int and 1 <= limit <= 5 else "유효하지 않음"
         return f"검색어 {length}자 · 결과 상한 {cap}건"[:160]
