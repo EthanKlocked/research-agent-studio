@@ -37,12 +37,60 @@ def assert_cancelled(manager, rid):
     assert not any(e["data"]["snapshot"]["status"] == "success" for e in events)
 
 
-def assert_reaped(processes):
+async def assert_reaped(processes):
     assert processes, "The regression must exercise a real MCP subprocess"
     for process in processes:
-        assert process.returncode is not None
-        with pytest.raises(ProcessLookupError):
-            os.kill(process.pid, 0)
+        assert process.returncode is not None, "Subprocess is still running"
+        try:
+            returncode = await asyncio.wait_for(process.wait(), 1)
+        except TimeoutError:
+            raise AssertionError("Subprocess wait timed out") from None
+        assert returncode is not None
+        assert returncode == process.returncode
+
+
+@pytest.fixture
+def no_pid_probes(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Process cleanup must use handles, not os.kill")
+    monkeypatch.setattr(os, "kill", forbidden)
+    return monkeypatch
+
+
+async def test_assert_reaped_accepts_exited_handle_without_pid_probe(no_pid_probes):
+    import anyio
+    import sys
+
+    async with await anyio.open_process([sys.executable, "-c", "pass"]) as process:
+        await asyncio.wait_for(process.wait(), 10)
+        await assert_reaped([process])
+
+
+async def test_assert_reaped_rejects_live_handle_without_pid_probe(no_pid_probes):
+    import anyio
+    import sys
+
+    async with await anyio.open_process([sys.executable, "-c", "import time; time.sleep(60)"]) as process:
+        try:
+            with pytest.raises(AssertionError):
+                await assert_reaped([process])
+        finally:
+            # The assertion must not probe PIDs; real test teardown may signal.
+            no_pid_probes.undo()
+            process.terminate()
+            await asyncio.wait_for(process.wait(), 10)
+
+
+async def test_assert_reaped_rejects_wait_timeout_without_pid_probe(no_pid_probes):
+    class StuckHandle:
+        returncode = 0
+        pid = 0  # Never used: PID probes are forbidden in this test.
+
+        async def wait(self):
+            await asyncio.Event().wait()
+
+    with pytest.raises(AssertionError, match="timed out"):
+        await assert_reaped([StuckHandle()])
 
 
 @pytest.mark.parametrize("phase", ["startup", "model_wait", "cleanup_error"])
@@ -82,7 +130,7 @@ async def test_cancel_real_mcp_lifecycle(phase, monkeypatch, mcp_processes):
         await asyncio.wait_for(entered.wait(), 15)
         assert not manager.tasks[rid].done()
         await asyncio.wait_for(manager.cancel(rid), 15)
-        assert_reaped(mcp_processes)
+        await assert_reaped(mcp_processes)
         assert_cancelled(manager, rid)
         before = manager.snapshot(rid)
         assert await manager.cancel(rid) == before
@@ -97,7 +145,7 @@ async def test_timeout_is_a_timeout_not_generic_model_error(mcp_processes):
     try:
         await asyncio.wait_for(manager.tasks[rid], 15)
         state = manager.snapshot(rid)
-        assert_reaped(mcp_processes)
+        await assert_reaped(mcp_processes)
         assert state["status"] == "error"
         assert "시간 제한" in state["errors"][0], state
         assert any(e["type"] == "tool_complete" for e in manager.runs[rid].events)

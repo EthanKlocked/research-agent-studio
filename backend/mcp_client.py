@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {"search_documents", "get_section"}
 SECTION_IDS = frozenset(
     (s["document_id"], s["section_id"])
-    for s in json.loads((ROOT / "data/apple_fy2024.json").read_text())["sections"]
+    for s in json.loads((ROOT / "data/apple_fy2024.json").read_text(encoding="utf-8"))["sections"]
 )
 
 class ToolFailure(Exception):
@@ -95,7 +95,7 @@ async def document_session(timeout=10, max_tool_calls=12, max_tool_corrections=2
     # No model credentials, global config, or traces are forwarded to the child.
     env = {"PATH": os.defpath, "PYTHONIOENCODING": "utf-8", "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false"}
     params = StdioServerParameters(command=sys.executable, args=["-m", "mcp_server.server"], cwd=str(ROOT), env=env)
-    with open(os.devnull, "w") as errlog:
+    with open(os.devnull, "w", encoding="utf-8") as errlog:
         async with stdio_client(params, errlog=errlog) as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await asyncio.wait_for(session.initialize(), timeout)

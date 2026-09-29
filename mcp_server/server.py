@@ -5,7 +5,7 @@ from typing import Annotated
 from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
-DATA = json.loads((Path(__file__).resolve().parents[1] / "data/apple_fy2024.json").read_text())
+DATA = json.loads((Path(__file__).resolve().parents[1] / "data/apple_fy2024.json").read_text(encoding="utf-8"))
 SECTIONS = {(s["document_id"], s["section_id"]): s for s in DATA["sections"]}
 mcp = FastMCP("research-documents", log_level="CRITICAL")
 

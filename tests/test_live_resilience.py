@@ -152,7 +152,7 @@ async def test_normal_empty_search_is_not_an_error(monkeypatch):
     assert any(e["type"] == "tool_complete" and e["data"]["count"] == 0 for e in events)
 
 
-DATA = json.loads((Path(__file__).resolve().parents[1]/"data/apple_fy2024.json").read_text())
+DATA = json.loads((Path(__file__).resolve().parents[1]/"data/apple_fy2024.json").read_text(encoding="utf-8"))
 GOOD = ("get_section", {k:DATA["sections"][0][k] for k in ("document_id","section_id")})
 BAD = ("get_section", {"document_id":"private-secret", "section_id":"missing"})
 SEARCH = ("search_documents", {"query":"revenue"})

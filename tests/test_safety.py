@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 
 def test_dataset_original_summaries_provenance():
-    data = json.loads((Path(__file__).resolve().parents[1] / "data/apple_fy2024.json").read_text())
+    data = json.loads((Path(__file__).resolve().parents[1] / "data/apple_fy2024.json").read_text(encoding="utf-8"))
     assert data["acquired_at"] == "2026-09-29"
     assert "Original factual summaries" in data["scope"]
     assert len({s["id"] for s in data["sections"]}) == len(data["sections"])
@@ -98,7 +98,7 @@ async def test_active_cancel_during_mcp_and_call_budget():
 def test_static_serving_and_request_limits(tmp_path):
     from backend.api import create_app
     from backend.config import Settings
-    (tmp_path / "index.html").write_text("<html>test front</html>")
+    (tmp_path / "index.html").write_text("<html>test front</html>", encoding="utf-8")
     with TestClient(create_app(Settings(test_mode=True), frontend_dir=tmp_path)) as c:
         assert c.get("/").text == "<html>test front</html>"
         assert c.get("/api/missing").status_code == 404
