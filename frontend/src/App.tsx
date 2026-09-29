@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { request } from "./api";
 import { isComplete, safeUrl } from "./state";
 import { useRun } from "./useRun";
+import { useContentFloor } from "./useContentFloor";
 import type { Config, Report } from "./types";
 import { Timeline } from "./Timeline";
 import { FocusRail, stages } from "./FocusRail";
@@ -96,10 +97,11 @@ export default function App() {
     [, tick] = useState(0);
   const sourcePanel = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (source && view === "sources") sourcePanel.current?.focus();
+    if (source && view === "sources") sourcePanel.current?.focus({ preventScroll: true });
   }, [source, view]);
   const run = useRun(),
     s = run.snapshot;
+  const { region, content } = useContentFloor(s?.run_id);
   const active = !!s && !isComplete(s),
     busy = active || run.pending;
   useEffect(() => {
@@ -290,6 +292,7 @@ export default function App() {
             {configError || run.error}
           </div>
         )}
+        <div className="research-region" ref={region}><div className="research-content" ref={content}>
         <section className="flow-panel" aria-label="실행 흐름">
           <h2 className="progress-title">Progress</h2>
           <div className="run-meta">
@@ -680,30 +683,11 @@ export default function App() {
           </aside>
           </div>
         </details>
-        <details className="developer">
-          <summary>
-            <span>개발 상세</span>
-            <span>
-              실행 이벤트 · State 변경 <b>{run.events.length}</b>
-            </span>
-          </summary>
-          <p className="muted small">
-            실행 이벤트와 State 변경 내역은 작업 타임라인에서 확인하세요. 최대 150건만
-            표시합니다.
-          </p>
-
-          <div className="state-fields">
-            <span>공통 State</span>
-            <code>
-              question · interpreted_request · plan · evidence · report ·
-              revisions · evaluation · feedback · iteration · status
-            </code>
-          </div>
-        </details>
         <footer>
 <span>Research Agent Studio</span>
           <span>실행 기록은 서버 메모리에만 유지됩니다.</span>
         </footer>
+        </div></div>
       </main>
     </div>
   );

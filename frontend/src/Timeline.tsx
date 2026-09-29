@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import type { RunEvent } from './types';
 const labels: Record<string, string> = {
   node_start: '단계 시작', node_complete: '단계 완료', tool_start: '도구 호출',
@@ -28,8 +27,6 @@ const sameCall = (a: RunEvent, b: RunEvent) => !!a.data.tool_call_id &&
   a.data.tool_call_id === b.data.tool_call_id && a.run_id === b.run_id &&
   groupLabel(a) === groupLabel(b) && (a.data.tool_name || a.data.tool) === (b.data.tool_name || b.data.tool);
 export function Timeline({ events, complete, lastSeq }: { events: RunEvent[]; complete: boolean; lastSeq: number }) {
-  const feed = useRef<HTMLDivElement>(null), follow = useRef(true);
-  useEffect(() => { if (follow.current && feed.current) feed.current.scrollTop = feed.current.scrollHeight; }, [events]);
   const groups: { key: number; label: string; events: RunEvent[] }[] = [];
   for (const e of events) {
     const last = groups.at(-1), label = groupLabel(e);
@@ -41,10 +38,7 @@ export function Timeline({ events, complete, lastSeq }: { events: RunEvent[]; co
     <div className="panel-top"><h2>작업 타임라인</h2><span className="draft-label">수신 {events.length}건</span></div>
     <p className="timeline-boundary">발생 순서 · 공개 작업 정보 · 최대 150건</p>
     {gap && <p className="history-gap">일부 이벤트 기록이 없습니다. 복구된 상태는 최신 snapshot 기준입니다.</p>}
-    <div className="timeline-feed" ref={feed} tabIndex={0} aria-label="시간순 작업 이벤트" onScroll={() => {
-      const el = feed.current;
-      if(el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
-    }}>
+    <div className="timeline-feed" tabIndex={0} aria-label="시간순 작업 이벤트">
       {!events.length && <p className="muted small">아직 수신한 이벤트가 없습니다.</p>}
       {groups.map(group => <section className="event-group" role="group" aria-label={group.label} key={group.key}>
         <h3>{group.label}</h3><ol>

@@ -86,10 +86,11 @@ describe("workbench", () => {
     expect(Stream.instances.length).toBe(delivery === "restore" ? 0 : 1);
     if (delivery !== "restore") expect(Stream.instances[0].close).toHaveBeenCalled();
   });
-  it("directs developer details readers to the visible event timeline", async () => {
+  it("keeps the actual timeline usable without the obsolete static developer block", async () => {
     await start();
-    fireEvent.click(screen.getByText("개발 상세"));
-    expect(screen.getByText("실행 이벤트와 State 변경 내역은 작업 타임라인에서 확인하세요. 최대 150건만 표시합니다.")).toBeVisible();
+    expect(screen.queryByText("개발 상세")).not.toBeInTheDocument();
+    expect(screen.queryByText("공통 State")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "작업 타임라인" })).toBeVisible();
   });
   it.each(["stream", "restore"])("keeps a failed revision's retained report and error visible via %s", async (delivery) => {
     const report = { title: "보존된 보고서", summary: "이전 평가를 받은 요약",
@@ -157,8 +158,9 @@ describe("workbench", () => {
     expect(screen.getByRole("button", { name: "실행 중단" })).toBeEnabled();
     expect(stream.close).not.toHaveBeenCalled();
     expect(within(screen.getByRole("region", { name: "작업 타임라인" })).getByText(`도구 오류 · get_document · ${reason}`)).toBeVisible();
-    fireEvent.click(screen.getByText("개발 상세"));
-    expect(screen.getByText("실행 이벤트와 State 변경 내역은 작업 타임라인에서 확인하세요. 최대 150건만 표시합니다.")).toBeVisible();
+    expect(screen.queryByText("개발 상세")).not.toBeInTheDocument();
+    expect(screen.queryByText("공통 State")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "작업 타임라인" })).toBeVisible();
     expect(screen.queryByText(/private invalid ID|private traceback/)).not.toBeInTheDocument();
 
     // An actual successful empty lookup remains distinct from the input error.
@@ -192,7 +194,7 @@ describe("workbench", () => {
         input_summary: "검색어 12자 · limit 5", input: { query: "private raw query" } },
     }) }));
     expect(screen.getByText("검색어 12자 · limit 5")).toBeVisible();
-    fireEvent.click(screen.getByText("개발 상세"));
+    expect(screen.queryByText("개발 상세")).not.toBeInTheDocument();
     expect(screen.getByText("도구 호출 · search · 검색어 12자 · limit 5")).toBeVisible();
     expect(screen.queryByText(/private raw query/)).not.toBeInTheDocument();
   });
@@ -213,7 +215,7 @@ describe("workbench", () => {
       expect(stream.close).toHaveBeenCalled();
       expect(screen.getByRole("button", { name: "조사 시작" })).toBeEnabled();
       expect(screen.getByText("0분 12초")).toBeVisible();
-      fireEvent.click(screen.getByText("개발 상세"));
+      expect(screen.queryByText("개발 상세")).not.toBeInTheDocument();
       expect(screen.getByText("분기 결정")).toBeVisible();
       expect(within(screen.getByRole("region", { name: "작업 타임라인" })).getByText("실행 종료")).toBeVisible();
       vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-01T00:10:00Z"));
@@ -685,4 +687,41 @@ describe("focus rail layout", () => {
     }
     expect(screen.getByRole("region", { name: "현재 작업" })).toHaveTextContent("아직 시작하지 않았습니다");
   });
+});
+
+it("does not automatically scroll the event timeline on stage arrival", async () => {
+  const stream = await start();
+  const feed = screen.getByLabelText("시간순 작업 이벤트");
+  Object.defineProperty(feed, "scrollHeight", { configurable: true, value: 800 });
+  feed.scrollTop = 120;
+  act(() => stream.emit(snapshot({ last_seq: 3, stage: "Researcher" }), "node_start"));
+  expect(feed.scrollTop).toBe(120);
+});
+it("reserves the largest natural content height within a run and resets for a new run", async () => {
+  let height = 1200;
+  const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({ height }) as DOMRect);
+  const stream = await start();
+  const region = document.querySelector<HTMLElement>(".research-region");
+  expect(region?.style.minHeight).toBe("1200px");
+  height = 400;
+  fireEvent.click(screen.getByRole("button", { name: "수집 자료 보기" }));
+  expect(region?.style.minHeight).toBe("1200px");
+  height = 1800;
+  act(() => stream.emit(snapshot({ last_seq: 3 })));
+  expect(region?.style.minHeight).toBe("1800px");
+  height = 300;
+  act(() => stream.emit(snapshot({ last_seq: 4, status: "success", finished_at: new Date().toISOString() }), "terminal"));
+  vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => snapshot({ run_id: "new-run" }) } as Response);
+  fireEvent.click(screen.getByRole("button", { name: "조사 시작" }));
+  await waitFor(() => expect(region?.style.minHeight).toBe("300px"));
+  measure.mockRestore();
+});
+it("focuses selected evidence without asking the browser to scroll", async () => {
+  const stream = await start();
+  act(() => stream.emit(snapshot({ last_seq: 3, evidence: [{ id: "e1", document_id: "d", section_id: "s", title: "Scroll evidence", url: "https://example.org", excerpt: "Evidence" }] })));
+  const focus = vi.spyOn(HTMLElement.prototype, "focus");
+  fireEvent.click(screen.getByRole("button", { name: /e1 Scroll evidence/ }));
+  expect(screen.getByRole("article", { name: "선택한 출처" })).toHaveFocus();
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  focus.mockRestore();
 });

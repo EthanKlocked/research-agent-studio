@@ -50,8 +50,10 @@ export function FocusRail({ snapshot: s, events, disconnected }: {
       </li>)}
     </ol>
     <section className="focus-card" aria-label="현재 작업">
+      <div className="focus-content" key={selected}>
       <div className="focus-heading"><div><span className="eyebrow">{selected}</span><h3>{stages.find(stage => stage.id === selected)?.label}</h3></div><span className="draft-label">{stageState(selected)}</span></div>
       <div className="focus-outputs"><div><h4>반영된 결과</h4><p>{output}</p></div><div><h4>최근 공개 활동</h4><p>{latest ? `수신 기록: ${safeEvent(latest)}` : "수신된 활동 기록 없음 · 상태는 최신 snapshot 기준입니다."}</p></div></div>
+      </div>
       <div className="focus-footer"><span>{s ? `${s.iteration}회차 · 근거 ${s.evidence.length}건` : "실행 대기"} · {complete ? "실행 종료" : disconnected ? "연결 복구 중" : pinned ? "선택한 단계" : "현재 단계 자동 따라가기"}</span>{pinned && <button type="button" onClick={() => setPinned(null)}>현재 단계로</button>}</div>
     </section>
   </>;
