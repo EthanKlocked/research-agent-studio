@@ -67,19 +67,28 @@ Browser QA used real graph/MCP/API/SSE and deterministic model responses. A loca
 
 Full `bash scripts/test.sh` on macOS: **221 Python passed in 30.15s**, **32 frontend passed**, TypeScript/build passed. `uv pip check` reported compatible installed packages. Adapter 0.3.2 is the only added lockfile package; no existing package versions changed. Tests exercise real MCP discovery and model metadata parity, inventory mismatch/duplicate rejection, bounded discovery/cancellation, no adapter double-dispatch and existing safety controls. OpenAI wire conversion removes JSON Schema titles; parity tests normalize only those titles at the wire layer and require exact adapter schema parity. No new live-provider, public-source or browser run was performed for this internal refactor.
 
-## Windows boundary
+## Windows verification — user-reported results
 
-PowerShell launchers mirror the install/start/test commands, check native exit codes and restore caller location/environment. Static contract tests do not prove PowerShell parsing or Windows process behavior. Direct development-environment execution was on macOS.
+The user reported final verification on **commit `4c672b8`, with no local modifications**, using **Windows 11, PowerShell 5.1 and Python 3.12.14**. These are operator-provided results, not a Windows execution independently reproduced on the macOS development host.
 
-User-provided Windows feedback reports PowerShell 5.1 / Python 3.12.14 installation, MCP child processes and 72 passing tests on an earlier revision, alongside implicit cp949 decoding and POSIX PID-helper failures. **Test-mode browser flows were checked on an initial commit with local fixes.** Earlier live-model checks were API-only; this does not negate the test-mode browser checks. The previous wording conflating these scopes was inaccurate. On commit `5a3c325`, the user additionally checked one live-model browser execution: it ended in timeout, and the error-category display worked. This is failure-path UI evidence, not a successful live workflow. Exact early commits/local adjustments and current full-suite Windows results remain unspecified.
+- Backend: **378/378 tests passed**.
+- Frontend: **59/59 tests passed**; TypeScript typecheck and production build passed.
+- Live model: **`gemini-2.5-flash`**. Apple questions succeeded in every reported attempt (reported success rate 100%; number of attempts not specified).
+- Exa web questions covering KOSPI, today's stock market and electric-vehicle batteries: **4/4 live runs succeeded**. This is four total runs across those topics, not four per topic.
+- With web search disabled, an out-of-scope question terminated normally with **`out_of_scope`**.
+- Successful runs took approximately **30–70 seconds**, with most time spent waiting for the LLM. Thinking-budget limits and streaming are deferred performance work, not changes implemented or validated here.
 
-Subsequent user-reported live API checks reached Gemini 2.5-family responses and exposed missing section retrieval, oversized schema fields and output-token truncation. They also reported Gemini 3.x tool-call failure from missing thought-signature roundtripping. These are externally reported observations, not locally reproduced live-provider verification or a blanket model-family compatibility guarantee. Current-fix Windows API and browser checks, exact-model compatibility and end-to-end output quality remain to be verified.
+### Official public sources — separate earlier revision
+
+The user also reported **Poppler 26.09** PDF and HTML extraction working normally, with **4/5 live-model runs successful on commit `1e734a6`**. This result belongs to that earlier revision and must not be presented as a `4c672b8` public-source rerun.
+
+These observed successes do not establish universal model compatibility or independently audited report accuracy. Earlier Gemini 3.x thought-signature/tool-call failures remain a separate known limitation; this report verifies `gemini-2.5-flash`, not Gemini 3.x.
 
 ## Live verification remaining
 
 After operator-local settings, verify provider authentication, model tool calls and JSON output, claim/evidence agreement, natural revise behavior and provider cancellation behavior. The real workflow may pass on its first evaluation. Explicit test scenarios must not be represented as real model judgment.
 
-The default corpus and offline test scenario are small and historical. General public web research requires explicit Exa configuration in live mode; its authentication, current provider behavior, cost and quality still require operator-local validation. Run state is in memory only. This is a loopback single-user prototype, not an internet-facing service.
+The default corpus and offline test scenario are small and historical. General public web research requires explicit Exa configuration in live mode. The Windows report above establishes successful runs in the reported environment; other environments/models, billing behavior, provider cancellation and detailed factual quality still require operator-local validation. Run state is in memory only. This is a loopback single-user prototype, not an internet-facing service.
 
 ## Screenshots
 
