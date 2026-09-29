@@ -113,9 +113,9 @@ def test_blank_pdf_parser_override_defaults_in_parent_and_server(monkeypatch, va
         lookups.append(name)
         return "/usr/bin/pdftotext" if name == "pdftotext" else None
     monkeypatch.setattr(mcp_client.shutil, "which", which)
-    assert Path(mcp_client.document_environment()["RESEARCH_PDFTOTEXT"]) == Path("/usr/bin/pdftotext").resolve()
+    assert Path(mcp_client.document_environment()["RESEARCH_PDFTOTEXT"]).resolve() == Path("/usr/bin/pdftotext").resolve()
     async def decode(body, executable):
-        assert Path(executable) == Path("/usr/bin/pdftotext").resolve()
+        assert Path(executable).resolve() == Path("/usr/bin/pdftotext").resolve()
         return OPERATIONS
     monkeypatch.setattr(public_sources, "_pdf_text", decode)
     store = public_sources.PublicSourceStore(enabled=True, transport=httpx.MockTransport(
