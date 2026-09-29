@@ -29,11 +29,11 @@ class Settings:
     max_tool_calls: int = 12
     max_tool_corrections: int = 2
     mcp_timeout: float = 10
-    model_timeout: float = 30
+    model_timeout: float = 60
     listener_timeout: float = 60
     planner_timeout: float = 60
     researcher_timeout: float = 180
-    reporter_timeout: float = 60
+    reporter_timeout: float = 120
     evaluator_timeout: float = 60
     run_timeout: float = 600
     max_output_tokens: int = 8192

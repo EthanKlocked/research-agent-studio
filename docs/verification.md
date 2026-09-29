@@ -1,5 +1,15 @@
 # Verification scope
 
+## Request/Reporter deadlines and omitted search limits
+
+`PYTHON_DOTENV_DISABLED=1 uv run --locked --extra dev python -m pytest tests -q` passes **468 Python tests in 61.44s** on macOS. Before production changes, the new regression file produced **20 expected failures and 70 passes**: old 30s/60s request/Reporter defaults and invalid summaries for omitted limits. After the fix, the focused new/default, summary and stabilization suites passed **114 tests**.
+
+Default model request timeout is now **60s** and the whole Reporter budget is **120s**, allowing more room for long revision evidence and the existing single schema/citation repair. Excerpts are not further truncated. Listener/Planner/Evaluator remain **60s**, Researcher **180s**, whole run **600s**, MCP operation **10s**. Independent explicit overrides remain authoritative; missing/blank/whitespace timeout values select defaults, and finite positive values up to 7200s are accepted. A role/run deadline can still interrupt a request or repair: two full 60s requests plus overhead are not guaranteed inside 120s.
+
+Tests cover default/override/boundary behavior for every configurable request/role/run timeout, existing provider timeout forwarding and whole-role enforcement, omitted search limits matching each named tool's shared schema default (currently 5), and explicit invalid/null/bool/string/out-of-range limits remaining invalid without coercion or argument disclosure. Existing mock-provider tests continue to cover bounded Reporter schema/citation repair and revision evidence handling.
+
+This is offline backend verification with deterministic fixtures, injected HTTP responses and real local MCP subprocesses, not live latency/quality or evidence-completeness validation. No actual `.env` was read, no existing server on port 8765 was accessed, and no paid/live provider calls were made. Frontend tests/build, browser smoke and Windows execution were not rerun for this backend-only change. Earlier counts below describe historical verification stages.
+
 ## Citation repair and remaining web allowances
 
 `PYTHON_DOTENV_DISABLED=1 bash scripts/test.sh` passes **378 Python tests and 59 frontend tests**, including TypeScript and production build. Reporter receives only the exact citation `id`, not competing retrieval identifiers. Citation failures are `validation`; correction shares the existing single schema/citation repair allowance and does not perform extra retrieval. Wrong document IDs and forged citations are rejected rather than silently accepted.
