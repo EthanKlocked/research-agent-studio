@@ -98,8 +98,9 @@ def test_bundled_data_with_simulated_cp949_default(target):
             from backend.config import Settings
             assert module.create_app(Settings(test_mode=True)).state.manager
         elif sys.argv[1] == "backend.mcp_client":
+            from mcp_server.public_sources import PUBLIC_SECTION_IDS
             assert module.SECTION_IDS == frozenset(
-                (s["document_id"], s["section_id"]) for s in expected["sections"])
+                (s["document_id"], s["section_id"]) for s in expected["sections"]) | PUBLIC_SECTION_IDS
         else:
             assert module.DATA == expected
             section = expected["sections"][0]

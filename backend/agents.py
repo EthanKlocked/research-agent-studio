@@ -6,7 +6,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call
 from pydantic import ValidationError
 from backend.errors import OutputLimit, OutputValidation
-from backend.mcp_client import DATASET_SCOPE
+from backend.mcp_client import get_dataset_scope
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -17,9 +17,9 @@ from backend.schemas import ROLE_SCHEMAS
 ROLE_PROMPTS = {
     "Listener": "Interpret the user's target, period, question and dataset boundaries; do not answer yet.",
     "Planner": "Produce up to six concrete research tasks. plan[] must contain 1..6 strings, each at most 300 characters. Preserve existing evidence and address evaluator feedback on revision.",
-    "Researcher": "Search documents and get_section for relevant hits; search returns metadata only, not evidence, so retrieve sections before finishing using ONLY your permitted tools. Use English keywords (revenue, earnings, risk) for this bilingual Apple dataset. Existing evidence need not be fetched again. You must call the tools; do not invent evidence. Final JSON is a short public summary, not reasoning.",
-    "Reporter": "Write a concise Korean report answering the question using only retrieved evidence. Every claim requires citation_ids. Include historical scope and uncertainty in limitations. Do not confuse quarterly and annual values; GAAP and non-GAAP differ.",
-    "Evaluator": "issues[] and follow_up[] must each contain at most 6 strings, each at most 300 characters. Assess question coverage, semantic claim/evidence agreement, sufficiency, and uncertainty. Return pass or revise with explicit public issues and follow_up tasks. Citation existence alone does not establish truth. Revise if coverage is inadequate.",
+    "Researcher": "Search documents and get_section for relevant hits; search returns metadata only, not evidence, so retrieve sections before finishing using ONLY your permitted tools. Use English keywords (revenue, earnings, risk) for this bilingual Apple dataset. Existing evidence need not be fetched again. retrieval_status=unavailable is an optional source failure, not evidence or an empty search. Do not retry it; retrieve other permitted sections instead. You must call the tools; do not invent evidence. Final JSON is a short public summary, not reasoning.",
+    "Reporter": "Write a concise Korean report answering the question using only retrieved evidence. Every claim requires citation_ids. Use the supplied dataset scope and available_documents to distinguish out-of-scope requests from missing in-scope evidence. State unavailable metrics, periods or comparisons explicitly in limitations; never invent product-level net income or margins or imply full coverage. Include historical scope and uncertainty in limitations. Disclose unavailable_sources as retrieval limitations; never cite them or treat their absence as a financial fact. Do not confuse quarterly and annual values; GAAP and non-GAAP differ.",
+    "Evaluator": "issues[] and follow_up[] must each contain at most 6 strings, each at most 300 characters. Assess question coverage, semantic claim/evidence agreement, sufficiency, and uncertainty. Return pass or revise with explicit public issues and follow_up tasks. Citation existence alone does not establish truth. Evaluate within the supplied dataset scope and available_documents. Unavailable out-of-scope metrics, periods or comparisons unavailable from permitted sources belong in report limitations. Do not revise solely to request unavailable data when its absence is clearly disclosed, including explicit unavailable_sources; do not retry these failed sources. A scope-limited pass means adequate within available scope, not a complete answer to unavailable requests. Still revise for missing in-scope evidence, unsupported claims, contradictory values, or absent/misleading limitations; give actionable follow_up tasks using permitted sources. Never use scope limitations to excuse unsupported claims.",
 }
 
 class FixtureModel(BaseChatModel):
@@ -108,11 +108,12 @@ class RoleRunner:
     async def invoke(self, role, state, tools, middleware=()):
         # Never include model config, raw internal messages or provider errors in workflow state.
         payload = {k: state[k] for k in ("question", "interpreted_request", "plan", "evidence", "report", "feedback", "iteration")}
-        payload["dataset"] = DATASET_SCOPE
+        payload["unavailable_sources"] = state.get("unavailable_sources", [])
+        payload["dataset"] = get_dataset_scope(enabled=False if self.factory.mode == "test" else None)
         try:
             with tracing_context(enabled=False):
                 agent = self.factory.create(role, tools, middleware)
-                async with asyncio.timeout(self.settings.model_timeout):
+                async with asyncio.timeout(self.settings.role_timeout(role)):
                     for attempt in range(2):
                         result = await agent.ainvoke({"messages":[{"role":"user", "content":json.dumps(payload, ensure_ascii=False)}]}, config={"recursion_limit":2 * self.settings.max_tool_calls + 4, "callbacks":[]})
                         try:

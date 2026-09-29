@@ -12,7 +12,7 @@ async def run_case(scenario="pass", **kwargs):
 
 @pytest.mark.parametrize("scenario,status", [("pass", "success"), ("revise", "success"), ("limit", "limit_reached"), ("empty", "empty"), ("tool_error", "error"), ("timeout", "error")])
 async def test_real_graph_scenarios(scenario, status):
-    manager, result = await run_case(scenario, model_timeout=0.4 if scenario == "timeout" else 15)
+    manager, result = await run_case(scenario, researcher_timeout=0.4 if scenario == "timeout" else 15)
     assert result["status"] == status, result
     assert result["finished_at"]
     events = list(manager.runs[result["run_id"]].events)

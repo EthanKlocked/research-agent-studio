@@ -404,6 +404,12 @@ export default function App() {
                 <span className="draft-label">근거 기반 작성</span>
               )}
             </div>
+            {s?.partial_result && (
+              <div role="alert" className="error-banner">
+                <strong>이전 보고서 · 추가 조사 실패 · 평가 미통과</strong>
+                <p>보존된 보고서: {s.partial_result.iteration}차 보고서</p>
+              </div>
+            )}
             {report ? (
               <div className="report-content">
                 <div className="report-kicker">

@@ -53,6 +53,47 @@ async function start() {
   return Stream.instances[0];
 }
 describe("workbench", () => {
+  it.each(["stream", "restore"])("keeps a failed revision's retained report and error visible via %s", async (delivery) => {
+    const report = { title: "보존된 보고서", summary: "이전 평가를 받은 요약",
+      claims: [{ text: "보존된 주장", citation_ids: ["e1"] }], limitations: ["아직 자료가 부족합니다"] };
+    const evaluation = { decision: "revise" as const, issues: ["위험 근거 부족"], follow_up: ["추가 조회 필요"] };
+    const retained = snapshot({ status: "error", iteration: 2, last_seq: 9,
+      finished_at: new Date().toISOString(), report, evaluation,
+      partial_result: { iteration: 1, reason: "revision_failed" },
+      errors: ["추가 조사 요청 시간이 초과되었습니다."],
+      evidence: [{ id: "e1", document_id: "d1", section_id: "s1", title: "보존된 출처",
+        url: "https://example.org/report", published_at: "2024-10-01", as_of: "2024-09-28", excerpt: "이전 근거 원문" }],
+      revisions: [{ iteration: 1, report, evaluation, evidence_ids: ["e1"], added_evidence_ids: ["e1"] }],
+    });
+    if (delivery === "stream") {
+      const stream = await start();
+      act(() => stream.emit(retained, "terminal"));
+      expect(stream.close).toHaveBeenCalled();
+    } else {
+      sessionStorage.setItem("research-studio.run-id", "run-1");
+      vi.mocked(fetch).mockImplementation(async (url) => ({ ok: true,
+        json: async () => url === "/api/config" ? config : retained,
+      } as Response));
+      render(<App />);
+    }
+    expect(await screen.findByText("이전 보고서 · 추가 조사 실패 · 평가 미통과")).toBeVisible();
+    expect(screen.getByText("보존된 보고서: 1차 보고서")).toBeVisible();
+    expect(screen.getByText("이전 평가를 받은 요약")).toBeVisible();
+    expect(screen.getByText("보존된 주장")).toBeVisible();
+    expect(screen.getByText("조사 중 오류가 발생했습니다")).toBeVisible();
+    expect(screen.getByText("추가 조사 요청 시간이 초과되었습니다.")).toBeVisible();
+    expect(screen.getByText("위험 근거 부족")).toBeVisible();
+    expect(screen.queryByText("조사가 완료되었습니다")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "출처 e1 보기" }));
+    expect(screen.getByText("이전 근거 원문")).toBeVisible();
+  });
+  it.each([null, undefined])("does not label an ordinary report as partial (%s)", async (partial_result) => {
+    const stream = await start();
+    act(() => stream.emit(snapshot({ status: "success", last_seq: 9, partial_result,
+      report: { title: "정상 보고서", summary: "완료 요약", claims: [], limitations: [] } }), "terminal"));
+    expect(screen.getByText("완료 요약")).toBeVisible();
+    expect(screen.queryByText("이전 보고서 · 추가 조사 실패 · 평가 미통과")).not.toBeInTheDocument();
+  });
   it("shows recoverable tool input errors without completing the lookup or run", async () => {
     const stream = await start();
     const reason = "도구 입력을 확인하고 다시 조회해 주세요.";
