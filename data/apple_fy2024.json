@@ -1,0 +1,63 @@
+{
+  "name": "Apple FY2024 Q4 공개자료 · 독립 요약",
+  "as_of": "2024-09-28",
+  "acquired_at": "2026-09-29",
+  "scope": "Original factual summaries, not redistributed source text. Historical quarterly results, not current investment advice.",
+  "sections": [
+    {
+      "id": "apple-q4-2024:performance",
+      "document_id": "apple-q4-2024",
+      "section_id": "performance",
+      "title": "Apple FY2024 Q4 results — original factual summary",
+      "url": "https://www.apple.com/newsroom/2024/10/apple-reports-fourth-quarter-results/",
+      "published_at": "2024-10-31",
+      "as_of": "2024-09-28",
+      "excerpt": "Apple의 2024 회계연도 4분기(2024-09-28 종료) 매출은 949억 달러로 전년 동기 대비 6% 증가했다. GAAP 희석 주당순이익은 0.97달러였다. 이는 연간 매출이 아닌 분기 수치다.",
+      "keywords": "revenue performance sales 실적 매출"
+    },
+    {
+      "id": "apple-q4-2024:earnings",
+      "document_id": "apple-q4-2024",
+      "section_id": "earnings",
+      "title": "Apple FY2024 Q4 earnings — original factual summary",
+      "url": "https://www.apple.com/newsroom/2024/10/apple-reports-fourth-quarter-results/",
+      "published_at": "2024-10-31",
+      "as_of": "2024-09-28",
+      "excerpt": "2024 회계연도 4분기 희석 주당순이익은 0.97달러였다. EU 국가보조금 판결 관련 일회성 비용을 제외한 비GAAP 수치는 1.64달러로, GAAP 수치와 구분해야 한다.",
+      "keywords": "earnings tax income 수익 세금"
+    },
+    {
+      "id": "apple-q4-2024:risks",
+      "document_id": "apple-q4-2024",
+      "section_id": "risks",
+      "title": "Apple disclosure risks — original factual summary",
+      "url": "https://www.apple.com/newsroom/2024/10/apple-reports-fourth-quarter-results/",
+      "published_at": "2024-10-31",
+      "as_of": "2024-09-28",
+      "excerpt": "Apple은 글로벌·지역 경기와 지정학적 불확실성, 경쟁과 제품 전환, 부품·제조 등 제3자 의존, IT 장애와 데이터 보안, 소송 및 규제 변화가 실적에 영향을 줄 수 있다고 밝혔다. 이는 공시한 가능성으로, 개별 위험의 발생이나 영향 규모를 단정하지 않는다.",
+      "keywords": "risk risks supply regulation 위험 리스크"
+    },
+    {
+      "id": "apple-fy2024:annual",
+      "document_id": "apple-fy2024",
+      "section_id": "annual",
+      "title": "Apple FY2024 annual results — original factual summary",
+      "url": "https://www.apple.com/newsroom/pdfs/fy2024-q4/FY24_Q4_Consolidated_Financial_Statements.pdf",
+      "published_at": "2024-10-31",
+      "as_of": "2024-09-28",
+      "excerpt": "2024-09-28 종료 회계연도 12개월 순매출은 391,035백만 달러(전년 383,285백만 달러), 순이익은 93,736백만 달러(전년 96,995백만 달러)였다. 서비스 매출은 96,169백만 달러(전년 85,200백만 달러)였다. 분기 실적과 구분한 연간 수치다.",
+      "keywords": "annual fiscal revenue earnings services 연간 실적 매출"
+    },
+    {
+      "id": "apple-10k-2024:supply",
+      "document_id": "apple-10k-2024",
+      "section_id": "supply",
+      "title": "Apple FY2024 Form 10-K Item 1A supply-chain risk — original factual summary",
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm",
+      "published_at": "2024-11-01",
+      "as_of": "2024-09-28",
+      "excerpt": "Apple의 FY2024 Form 10-K Item 1A는 제조의 상당 부분이 외주 파트너에 의존하며 일부 파트너·지역에 집중되어 있다고 설명한다. 이 구조는 생산·유통에 대한 직접 통제를 줄이고, 파트너의 공급 차질이나 물류 중단이 비용과 제품 공급에 영향을 줄 수 있는 위험이다.",
+      "keywords": "risk risks supply manufacturing 외주 공급망 위험 리스크"
+    }
+  ]
+}

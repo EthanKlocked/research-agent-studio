@@ -1,0 +1,124 @@
+"""Bounded process-local run snapshots and replay logs; not durable persistence."""
+import asyncio
+from collections import OrderedDict, deque
+from copy import deepcopy
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from uuid import uuid4
+from langsmith import tracing_context
+from backend.workflow import build_graph
+from backend.mcp_client import ToolFailure
+
+TERMINAL = {"success", "limit_reached", "empty", "error", "cancelled"}
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+class RunRejected(Exception):
+    def __init__(self, message, status_code=429):
+        super().__init__(message)
+        self.status_code = status_code
+
+@dataclass
+class RunRecord:
+    state: dict
+    events: deque
+    changed: asyncio.Event = field(default_factory=asyncio.Event)
+    cancel_requested: bool = False
+    finalized: bool = False
+
+def safe_error(exc):
+    if isinstance(exc, BaseExceptionGroup):
+        messages = [safe_error(e) for e in exc.exceptions]
+        return next((m for m in messages if m != "실행 오류: 모델 응답 또는 출력 검증에 실패했습니다."), messages[0])
+    if isinstance(exc, TimeoutError):
+        return "실행 시간 제한에 도달했습니다. 요청 또는 모델 응답 시간이 초과되었습니다."
+    if isinstance(exc, ToolFailure):
+        return "자료 조회 도구가 실패했습니다. 근거 없음과는 다른 오류입니다."
+    return "실행 오류: 모델 응답 또는 출력 검증에 실패했습니다."
+
+class RunManager:
+    def __init__(self, settings):
+        self.settings = settings
+        self.runs = OrderedDict()
+        self.tasks = {}
+
+    def snapshot(self, run_id):
+        return deepcopy(self.runs[run_id].state)
+
+    async def emit(self, run_id, kind, state, data=None):
+        record = self.runs[run_id]
+        if record.finalized or (record.cancel_requested and kind != "terminal"):
+            return
+        if kind == "terminal":
+            if record.cancel_requested:
+                state = {**state, "status": "cancelled", "errors": []}
+            record.finalized = True
+        seq = record.state["last_seq"] + 1
+        record.state = deepcopy(state)
+        record.state["last_seq"] = seq
+        event = {"seq":seq, "run_id":run_id, "type":kind, "timestamp":now(), "data":{**(data or {}), "snapshot":deepcopy(record.state)}}
+        record.events.append(event)
+        record.changed.set()
+
+    async def start(self, request):
+        if request.mode == "test" and not self.settings.test_mode:
+            raise RunRejected("테스트 모드는 운영자가 활성화해야 합니다.", 403)
+        if request.mode == "live" and not self.settings.configured:
+            raise RunRejected("모델 연결 설정이 없습니다. 로컬 환경변수를 확인하세요.", 409)
+        if request.mode == "live" and request.scenario != "pass":
+            raise RunRejected("시나리오 주입은 테스트 모드에서만 허용됩니다.", 422)
+        if sum(not task.done() for task in self.tasks.values()) >= self.settings.max_concurrent:
+            raise RunRejected("동시 실행 한도에 도달했습니다.")
+        while len(self.runs) >= self.settings.max_runs:
+            old = next((rid for rid in self.runs if self.tasks[rid].done()), None)
+            if old is None:
+                raise RunRejected("실행 저장 한도에 도달했습니다.")
+            self.runs.pop(old)
+            self.tasks.pop(old)
+        run_id = uuid4().hex
+        state = dict(run_id=run_id, question=request.question, mode=request.mode, status="queued", stage=None, iteration=0, started_at=now(), finished_at=None, last_seq=0, interpreted_request="", plan=[], evidence=[], report=None, revisions=[], evaluation=None, feedback=[], errors=[])
+        self.runs[run_id] = RunRecord(state, deque(maxlen=self.settings.max_events))
+        self.tasks[run_id] = asyncio.create_task(self.execute(run_id, request))
+        return self.snapshot(run_id)
+
+    async def execute(self, run_id, request):
+        async def publish(kind, state, data):
+            await self.emit(run_id, kind, state, data)
+        try:
+            with tracing_context(enabled=False):
+                graph = build_graph(self.settings, request.mode, request.scenario, publish)
+                async with asyncio.timeout(self.settings.run_timeout):
+                    result = await graph.ainvoke(self.snapshot(run_id), config={"recursion_limit":32, "callbacks":[]})
+            state = result
+        except asyncio.CancelledError:
+            state = self.snapshot(run_id)
+            state["status"] = "cancelled"
+        except (Exception, BaseExceptionGroup) as exc:
+            state = self.snapshot(run_id)
+            state.update(status="error", errors=[safe_error(exc)])
+        state["finished_at"] = now()
+        await self.emit(run_id, "terminal", state)
+
+    async def cancel(self, run_id):
+        record = self.runs[run_id]
+        if not record.finalized:
+            task = self.tasks[run_id]
+            # Record intent before signalling: MCP/AnyIO cleanup may replace the
+            # CancelledError with an ExceptionGroup, or a callee may swallow it.
+            # Repeated requests must not interrupt the first request's cleanup.
+            if not record.cancel_requested:
+                record.cancel_requested = True
+                task.cancel()
+            await asyncio.shield(asyncio.gather(task, return_exceptions=True))
+            # A task cancelled before its first instruction cannot finalize itself.
+            if not record.finalized:
+                state = self.snapshot(run_id)
+                state.update(status="cancelled", finished_at=now())
+                await self.emit(run_id, "terminal", state)
+        return self.snapshot(run_id)
+
+    async def close(self):
+        for rid in list(self.runs):
+            if not self.tasks[rid].done():
+                await self.cancel(rid)
