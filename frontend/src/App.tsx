@@ -2,15 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { request } from "./api";
 import { isComplete, safeUrl } from "./state";
 import { useRun } from "./useRun";
-import type { Config, Report, Stage } from "./types";
+import type { Config, Report } from "./types";
 import { Timeline } from "./Timeline";
-const stages: { id: Stage; label: string; active: string }[] = [
-  { id: "Listener", label: "요청 해석", active: "요청 해석 중" },
-  { id: "Planner", label: "조사 계획", active: "조사 계획 중" },
-  { id: "Researcher", label: "근거 수집", active: "근거 수집 중" },
-  { id: "Reporter", label: "보고서 작성", active: "보고서 작성 중" },
-  { id: "Evaluator", label: "결과 평가", active: "결과 평가 중" },
-];
+import { FocusRail, stages } from "./FocusRail";
 const statusText = {
   queued: "실행 대기 중",
   running: "조사 중",
@@ -160,15 +154,6 @@ export default function App() {
       : "질문을 기다리고 있습니다";
   return (
     <div className="app-shell dashboard" data-motion={active && !run.disconnected ? "active" : "paused"}>
-      <aside className="workspace-sidebar" aria-label="작업 공간">
-        <div className="sidebar-brand">Research Studio</div>
-        <p className="sidebar-label">WORKSPACE</p>
-        <a href="#question">리서치 질문</a>
-        <a href="#research-views">결과와 수집 자료</a>
-        <p className="sidebar-label">현재 실행</p>
-        <p className="small">{s?.question || "새 질문을 입력해 주세요."}</p>
-        <p className="sidebar-boundary">로컬 워크스페이스<br/>실행 기록은 메모리에 유지됩니다.</p>
-      </aside>
       <a className="skip-link" href="#report" onClick={() => setView("report")}>
         보고서로 건너뛰기
       </a>
@@ -181,18 +166,12 @@ export default function App() {
             Research Agent <strong>Studio</strong>
           </span>
         </a>
-        <div className="topbar-note">
-          <span className="tiny-dot" /> 공개 데이터 기반 독립 구현{" "}
-          <span className="local-label">LOCAL WORKBENCH</span>
-        </div>
       </header>
       <main>
         <section className="intro">
           <div>
-            <h1>리서치 워크스페이스</h1>
-            <p className="intro-copy">
-              계획하고, 조사하고, 검토합니다. 결과는 출처와 함께 확인하세요.
-            </p>
+            <h1>Research</h1>
+
           </div>
           <div className="dataset">
             <span className="eyebrow">DATASET</span>
@@ -220,7 +199,7 @@ export default function App() {
                 aria-label="리서치 질문"
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder="예: 공개 자료를 바탕으로 기업의 실적과 주요 위험요인을 분석해 주세요."
+                placeholder="조사할 질문을 입력해 주세요."
                 maxLength={2000}
                 rows={2}
                 disabled={busy}
@@ -245,7 +224,7 @@ export default function App() {
                     (mode === "test" && !config.test_mode_available)
                   }
                 >
-                  {run.pending ? "실행 준비 중" : "리서치 시작"}{" "}
+                  {run.pending ? "실행 준비 중" : "조사 시작"}{" "}
                   <span aria-hidden="true">↗</span>
                 </button>
               )}
@@ -312,6 +291,7 @@ export default function App() {
           </div>
         )}
         <section className="flow-panel" aria-label="실행 흐름">
+          <h2 className="progress-title">Progress</h2>
           <div className="run-meta">
             <span className={`run-status ${s?.status ?? "idle"}`} role="status">
               <span className={active ? "status-dot active" : "status-dot"} />
@@ -335,31 +315,7 @@ export default function App() {
             </p>
           )}
           {s && <p className="run-id small muted" style={{ overflowWrap: "anywhere" }}>실행 ID: {s.run_id}</p>}
-          <ol className="stages">
-            {stages.map((stage, i) => {
-              const current = active && s?.stage === stage.id;
-              return (
-                <li
-                  key={stage.id}
-                  className={current ? "current" : ""}
-                  aria-current={current ? "step" : undefined}
-                >
-                  <span className="stage-number">
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                  <span>
-                    <strong>{stage.label}</strong>
-                    <small>{stage.id}</small>
-                  </span>
-                  {i < 4 && (
-                    <span className="stage-arrow" aria-hidden="true">
-                      →
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
+<FocusRail key={s?.run_id ?? "idle"} snapshot={s} events={run.events} disconnected={run.disconnected} />
           <div
             className={`return-path ${s?.evaluation?.decision === "revise" || s?.feedback.length ? "revising" : ""}`}
           >
@@ -370,13 +326,85 @@ export default function App() {
             )}
           </div>
         </section>
+            <section className="sources">
+              {view === "sources" && <p className="small muted">검색 결과는 인용 근거가 아닙니다. 실제 조회되어 반영된 근거만 표시합니다.</p>}
+              <div className="section-heading">
+                <h3>Sources</h3>
+                <span>{s?.evidence.length ?? 0}건</span>
+              </div>
+              {s?.evidence.length ? (
+                <div className="source-chips">
+                  {s.evidence.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => { setView("sources"); setSource(e.id); }}
+                      aria-pressed={source === e.id}
+                    >
+                      <span>{e.id}</span>
+                      {e.title}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted small">
+                  조회된 출처와 인용 구간이 여기에 표시됩니다.
+                </p>
+              )}
+              {!!s?.unavailable_sources?.length && <section className="limitations">
+                <h3>이용 불가 자료 · 인용 제외</h3>
+                <List items={s.unavailable_sources.map(item => `${item.document_id} / ${item.section_id}`)} empty="" />
+              </section>}
+              {source && !evidence && (
+                <p role="alert">이 인용에 연결된 근거를 찾을 수 없습니다.</p>
+              )}
+              {evidence && (
+                <article
+                  ref={sourcePanel}
+                  tabIndex={-1}
+                  className="source-detail"
+                  aria-label="선택한 출처"
+                >
+                  <div className="source-title">
+                    <h4>{evidence.title}</h4>
+                    <button
+                      aria-label="출처 닫기"
+                      onClick={() => setSource(null)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <p className="source-dates">
+                    게시일 {evidenceDate(evidence.published_at)}{" "}
+                    <span>자료 기준일 {evidenceDate(evidence.as_of)}</span>
+                  </p>
+                  {evidence.provenance && <p className="small muted">수집 경로: {evidence.provenance}</p>}
+                  <blockquote>{evidence.excerpt}</blockquote>
+                  <div className="source-bottom">
+                    <small>
+                      {evidence.document_id} / {evidence.section_id}
+                    </small>
+                    {evidenceUrl ? (
+                      <a
+                        href={evidenceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        원문 보기 ↗
+                      </a>
+                    ) : (
+                      <span className="muted small">안전한 원문 링크 없음</span>
+                    )}
+                  </div>
+                  {evidenceUrl && <p className="source-url">{evidenceUrl}</p>}
+                </article>
+              )}
+            </section>
         <nav id="research-views" className="view-tabs" aria-label="리서치 보기">
-          <button aria-label="보고서 보기" aria-pressed={view === "report"} onClick={() => setView("report")}>보고서</button>
-          <button aria-label="수집 자료 보기" aria-pressed={view === "sources"} onClick={() => setView("sources")}>수집 자료 <span>{s?.evidence.length ?? 0}</span></button>
-          <button aria-label="수정 기록 보기" aria-pressed={view === "history"} onClick={() => setView("history")}>수정 기록 <span>{revisions.length}</span></button>
+          <button aria-label="보고서 보기" aria-pressed={view === "report"} onClick={() => setView("report")}>Report</button>
+          <button aria-label="수집 자료 보기" aria-pressed={view === "sources"} onClick={() => setView("sources")}>Sources <span>{s?.evidence.length ?? 0}</span></button>
+          <button aria-label="수정 기록 보기" aria-pressed={view === "history"} onClick={() => setView("history")}>History <span>{revisions.length}</span></button>
         </nav>
         <div className="workspace">
-          <Timeline events={run.events} complete={!!s && isComplete(s)} lastSeq={s?.last_seq ?? 0} />
           <section
             id="report"
             className="report-panel"
@@ -386,7 +414,7 @@ export default function App() {
             <div className="panel-top">
               <div>
                 <span className="eyebrow">RESEARCH RESULT</span>
-                <h2>리서치 보고서</h2>
+                <h2>Report</h2>
               </div>
               {revisions.length > 0 ? (
                 <label className="revision-select">
@@ -494,7 +522,7 @@ export default function App() {
                         ? "새 질문으로 다시 시작할 수 있습니다"
                         : active
                           ? "근거를 모아 보고서를 만들고 있습니다"
-                          : "좋은 조사는, 좋은 질문에서 시작됩니다."}
+                          : "아직 작성된 보고서가 없습니다."}
                 </h3>
                 <p>
                   {s?.status === "out_of_scope"
@@ -522,81 +550,8 @@ export default function App() {
                 <List items={s.errors} empty="" />
               </div>
             ) : null}
-            <section className="sources" hidden={view === "history"}>
-              {view === "sources" && <p className="small muted">검색 결과는 인용 근거가 아닙니다. 실제 조회되어 반영된 근거만 표시합니다.</p>}
-              <div className="section-heading">
-                <h3>근거 자료</h3>
-                <span>{s?.evidence.length ?? 0}건</span>
-              </div>
-              {s?.evidence.length ? (
-                <div className="source-chips">
-                  {s.evidence.map((e) => (
-                    <button
-                      key={e.id}
-                      onClick={() => { setView("sources"); setSource(e.id); }}
-                      aria-pressed={source === e.id}
-                    >
-                      <span>{e.id}</span>
-                      {e.title}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="muted small">
-                  조회된 출처와 인용 구간이 여기에 표시됩니다.
-                </p>
-              )}
-              {!!s?.unavailable_sources?.length && <section className="limitations">
-                <h3>이용 불가 자료 · 인용 제외</h3>
-                <List items={s.unavailable_sources.map(item => `${item.document_id} / ${item.section_id}`)} empty="" />
-              </section>}
-              {source && !evidence && (
-                <p role="alert">이 인용에 연결된 근거를 찾을 수 없습니다.</p>
-              )}
-              {evidence && (
-                <article
-                  ref={sourcePanel}
-                  tabIndex={-1}
-                  className="source-detail"
-                  aria-label="선택한 출처"
-                >
-                  <div className="source-title">
-                    <h4>{evidence.title}</h4>
-                    <button
-                      aria-label="출처 닫기"
-                      onClick={() => setSource(null)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <p className="source-dates">
-                    게시일 {evidenceDate(evidence.published_at)}{" "}
-                    <span>자료 기준일 {evidenceDate(evidence.as_of)}</span>
-                  </p>
-                  {evidence.provenance && <p className="small muted">수집 경로: {evidence.provenance}</p>}
-                  <blockquote>{evidence.excerpt}</blockquote>
-                  <div className="source-bottom">
-                    <small>
-                      {evidence.document_id} / {evidence.section_id}
-                    </small>
-                    {evidenceUrl ? (
-                      <a
-                        href={evidenceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        원문 보기 ↗
-                      </a>
-                    ) : (
-                      <span className="muted small">안전한 원문 링크 없음</span>
-                    )}
-                  </div>
-                  {evidenceUrl && <p className="source-url">{evidenceUrl}</p>}
-                </article>
-              )}
-            </section>
             {view === "history" && <section className="revision-history" aria-label="수정 기록">
-              <h3>수정 기록</h3>
+              <h3>History</h3>
               {!revisions.length && <p className="muted small">아직 완료된 검토 기록이 없습니다.</p>}
               {revisions.map(r => <article key={r.iteration}>
                 <h4>{r.iteration}차 검토 · {r.evaluation.decision === "pass" ? "통과" : "수정 필요"}</h4>
@@ -608,6 +563,12 @@ export default function App() {
               </article>)}
             </section>}
           </section>
+
+        </div>
+        <details className="activity-details">
+          <summary>작업 상세</summary>
+          <div className="detail-grid">
+            <Timeline events={run.events} complete={!!s && isComplete(s)} lastSeq={s?.last_seq ?? 0} />
           <aside className="work-panel" aria-label="작업 노트">
             <div className="panel-top">
               <div>
@@ -717,7 +678,8 @@ export default function App() {
               모델 내부 추론은 노출하지 않습니다.
             </p>
           </aside>
-        </div>
+          </div>
+        </details>
         <details className="developer">
           <summary>
             <span>개발 상세</span>
@@ -739,10 +701,7 @@ export default function App() {
           </div>
         </details>
         <footer>
-          <span>
-            Research Agent Studio <span className="footer-divider">/</span> 공개
-            데이터 기반 독립 리서치 프로토타입
-          </span>
+<span>Research Agent Studio</span>
           <span>실행 기록은 서버 메모리에만 유지됩니다.</span>
         </footer>
       </main>

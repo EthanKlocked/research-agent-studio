@@ -49,8 +49,9 @@ async function start() {
   fireEvent.change(screen.getByLabelText("리서치 질문"), {
     target: { value: "실적과 위험요인을 조사해 주세요." },
   });
-  fireEvent.click(screen.getByRole("button", { name: "리서치 시작" }));
+  fireEvent.click(screen.getByRole("button", { name: "조사 시작" }));
   await waitFor(() => expect(Stream.instances.length).toBe(1));
+  fireEvent.click(screen.getByText("작업 상세"));
   return Stream.instances[0];
 }
 describe("workbench", () => {
@@ -81,7 +82,7 @@ describe("workbench", () => {
     expect(screen.getByText("일반 웹 검색이 꺼져 있어 현재 제공된 자료만 조사할 수 있습니다. 도구 오류나 검색 결과 없음과는 다릅니다.")).toBeVisible();
     expect(screen.queryByText("조사 중 오류가 발생했습니다")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "리서치 시작" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "조사 시작" })).toBeEnabled());
     expect(Stream.instances.length).toBe(delivery === "restore" ? 0 : 1);
     if (delivery !== "restore") expect(Stream.instances[0].close).toHaveBeenCalled();
   });
@@ -123,10 +124,11 @@ describe("workbench", () => {
     expect(screen.getByText("보존된 주장")).toBeVisible();
     expect(screen.getByText("조사 중 오류가 발생했습니다")).toBeVisible();
     expect(screen.getByText("추가 조사 요청 시간이 초과되었습니다.")).toBeVisible();
+    if (delivery === "restore") fireEvent.click(screen.getByText("작업 상세"));
     expect(screen.getByText("위험 근거 부족")).toBeVisible();
     expect(screen.queryByText("조사가 완료되었습니다")).not.toBeInTheDocument();
     // Wait for restoration and its form/source-reset effect before selecting evidence.
-    await waitFor(() => expect(screen.getByRole("button", { name: "리서치 시작" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "조사 시작" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "출처 e1 보기" }));
     expect(screen.getByText("이전 근거 원문")).toBeVisible();
   });
@@ -151,7 +153,7 @@ describe("workbench", () => {
     expect(screen.getByText(reason)).toBeVisible();
     expect(screen.queryByText(/조회 완료|결과 0건/)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByText("근거 수집 중")).toBeVisible();
+    expect(screen.getByText("자료 수집 중")).toBeVisible();
     expect(screen.getByRole("button", { name: "실행 중단" })).toBeEnabled();
     expect(stream.close).not.toHaveBeenCalled();
     expect(within(screen.getByRole("region", { name: "작업 타임라인" })).getByText(`도구 오류 · get_document · ${reason}`)).toBeVisible();
@@ -204,16 +206,16 @@ describe("workbench", () => {
       expect(stream.close).not.toHaveBeenCalled();
       expect(screen.getByRole("button", { name: "실행 중단" })).toBeEnabled();
       expect(screen.getByLabelText("리서치 질문")).toBeDisabled();
-      expect(screen.getByText("결과 평가 중")).toBeVisible();
+      expect(screen.getByText("검토 중")).toBeVisible();
       act(() => stream.emit({ ...intermediate, last_seq: 3 }, "branch"));
       act(() => stream.emit({ ...intermediate, last_seq: 4,
         finished_at: "2026-01-01T00:00:12Z" }, "terminal"));
       expect(stream.close).toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "리서치 시작" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "조사 시작" })).toBeEnabled();
       expect(screen.getByText("0분 12초")).toBeVisible();
       fireEvent.click(screen.getByText("개발 상세"));
       expect(screen.getByText("분기 결정")).toBeVisible();
-      expect(screen.getByText("실행 종료")).toBeVisible();
+      expect(within(screen.getByRole("region", { name: "작업 타임라인" })).getByText("실행 종료")).toBeVisible();
       vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-01T00:10:00Z"));
       fireEvent.change(screen.getByLabelText("리서치 질문"), { target: { value: "새 질문" } });
       expect(screen.getByText("0분 12초")).toBeVisible();
@@ -243,7 +245,7 @@ describe("workbench", () => {
     act(() => stream.emit(snapshot({ status: "success", last_seq: 8 }), "terminal"));
     act(() => stream.onerror?.());
     expect(screen.queryByText(/연결 복구 중/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "리서치 시작" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "조사 시작" })).toBeEnabled();
   });
   it.each([true, false])("sends scenario pass in live mode (test available: %s)", async (testAvailable) => {
     vi.mocked(fetch).mockImplementation(async (url) => ({ ok: true,
@@ -259,7 +261,7 @@ describe("workbench", () => {
     }
     expect(screen.queryByLabelText("테스트 시나리오")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("리서치 질문"), { target: { value: "실제 조사" } });
-    fireEvent.click(screen.getByRole("button", { name: "리서치 시작" }));
+    fireEvent.click(screen.getByRole("button", { name: "조사 시작" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/runs", expect.objectContaining({
       method: "POST", body: JSON.stringify({ question: "실제 조사", mode: "live", scenario: "pass" }),
     })));
@@ -274,7 +276,7 @@ describe("workbench", () => {
     expect(
       await screen.findByRole("alert", {}, { timeout: 3500 }),
     ).toHaveTextContent("실행 기록을 찾을 수 없습니다");
-    expect(screen.getByRole("button", { name: "리서치 시작" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "조사 시작" })).toBeEnabled();
     expect(sessionStorage.getItem("research-studio.run-id")).toBeNull();
   });
   it("labels test mode and disables unconfigured live mode", async () => {
@@ -298,7 +300,7 @@ describe("workbench", () => {
         }),
       }),
     );
-    expect(screen.getByText("요청 해석 중")).toBeVisible();
+    expect(screen.getByText("요청 확인 중")).toBeVisible();
     act(() => stream.emit(snapshot({ last_seq: 2, stage: "Planner" })));
     expect(screen.getByText("조사 계획 중")).toBeVisible();
     act(() => stream.emit(snapshot({ last_seq: 1, stage: "Evaluator" })));
@@ -378,7 +380,7 @@ describe("workbench", () => {
       json: async () => snapshot({ last_seq: 7, stage: "Researcher" }),
     } as Response);
     act(() => stream.onerror?.());
-    expect(await screen.findByText(/연결 복구 중/)).toBeVisible();
+    expect(await screen.findByText(/연결 복구 중 · 서버/)).toBeVisible();
     await waitFor(() => expect(Stream.instances.length).toBe(2), {
       timeout: 3500,
     });
@@ -441,7 +443,7 @@ describe("workbench", () => {
         snapshot({ run_id: "other-run", last_seq: 100, stage: "Evaluator" }),
       ),
     );
-    expect(screen.getByText("요청 해석 중")).toBeVisible();
+    expect(screen.getByText("요청 확인 중")).toBeVisible();
   });
   it("moves keyboard focus to selected source and rejects unsafe URLs", async () => {
     const stream = await start();
@@ -587,7 +589,7 @@ describe("service dashboard", () => {
   });
   it("offers persistent report, source and revision views with an observable timeline", async () => {
     const stream = await start();
-    expect(screen.getByRole('heading', {name:'리서치 워크스페이스'})).toBeVisible();
+    expect(screen.getByRole('heading', {name:'Research'})).toBeVisible();
     expect(screen.getByRole('region', {name:'작업 타임라인'})).toBeVisible();
     expect(screen.getByRole('button', {name:'보고서 보기'})).toHaveAttribute('aria-pressed','true');
     fireEvent.click(screen.getByRole('button', {name:'수집 자료 보기'}));
@@ -605,7 +607,7 @@ describe("service dashboard", () => {
     const stream = await start();
     expect(document.querySelector('.stages [aria-current="step"]')).not.toBeNull();
     act(() => stream.onerror?.());
-    expect(screen.getByText(/연결 복구 중/)).toBeVisible();
+    expect(screen.getByText(/연결 복구 중 · 서버/)).toBeVisible();
     expect(document.querySelector('.dashboard')).toHaveAttribute('data-motion','paused');
     act(() => stream.emit(snapshot({last_seq:3,status:'error',stage:'Researcher',finished_at:new Date().toISOString()}),'terminal'));
     expect(document.querySelector('.stages [aria-current="step"]')).toBeNull();
@@ -621,5 +623,66 @@ describe("service dashboard", () => {
     expect(screen.getByText('새 요약')).toBeVisible();
     expect(screen.getByText('평가 전 초안')).toBeVisible();
     expect(screen.queryByText('조사가 완료되었습니다')).not.toBeInTheDocument();
+  });
+});
+
+
+describe("focus rail layout", () => {
+  it("preserves the observed request completion when Planner advances from iteration zero", async () => {
+    const stream = await start();
+    act(() => stream.emit(snapshot({ last_seq: 2, stage: "Listener", iteration: 0 }), "node_complete"));
+    act(() => stream.emit(snapshot({ last_seq: 3, stage: "Planner", iteration: 1 }), "node_start"));
+    expect(screen.getByRole("button", { name: /1단계 요청 확인/ })).toHaveTextContent("완료");
+    act(() => stream.emit(snapshot({ last_seq: 4, stage: "Planner", iteration: 2 }), "node_start"));
+    expect(screen.getByRole("button", { name: /1단계 요청 확인/ })).toHaveTextContent("완료");
+  });
+  it("follows observed stages, pins a selection and retains admitted sources through revisions", async () => {
+    const stream = await start();
+    const activity = () => screen.getByRole("region", { name: "현재 작업" });
+    act(() => stream.emit(snapshot({ last_seq: 2, stage: "Researcher" }), "tool_complete"));
+    expect(activity()).toHaveTextContent("자료 수집");
+    expect(activity()).toHaveTextContent("반영된 근거 0건");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    const evidence = [{ id: "admitted", title: "등록된 원문", document_id: "d", section_id: "s", url: "https://example.org", excerpt: "인용 구간" }];
+    act(() => stream.emit(snapshot({ last_seq: 3, stage: "Researcher", evidence }), "node_complete"));
+    expect(activity()).toHaveTextContent("반영된 근거 1건");
+    expect(screen.getByRole("button", { name: /admitted 등록된 원문/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /1단계 요청 확인/ }));
+    expect(activity()).toHaveTextContent("요청 확인");
+    act(() => stream.emit(snapshot({ last_seq: 4, iteration: 2, stage: "Planner", evidence, plan: ["추가 자료 확인"] }), "node_start"));
+    expect(activity()).toHaveTextContent("요청 확인");
+    fireEvent.click(screen.getByRole("button", { name: "현재 단계로" }));
+    expect(activity()).toHaveTextContent("조사 계획");
+    expect(activity()).toHaveTextContent("추가 자료 확인");
+    expect(screen.getByRole("button", { name: /admitted 등록된 원문/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /3단계 자료 수집/ })).toHaveTextContent("대기");
+    act(() => stream.emit(snapshot({ last_seq: 5, iteration: 2, stage: "Planner", evidence, status: "error", finished_at: "2026-01-01T00:00:12Z" }), "terminal"));
+    expect(activity()).toHaveTextContent("실행 종료");
+    expect(document.querySelector('.stages [aria-current="step"]')).toBeNull();
+  });
+  it("uses snapshot outputs on restoration without inventing completed stages or tool activity", async () => {
+    sessionStorage.setItem("research-studio.run-id", "run-1");
+    vi.mocked(fetch).mockImplementation(async (url) => ({ ok: true, json: async () => url === "/api/config" ? config : snapshot({ stage: "Planner", last_seq: 8, plan: ["복구된 계획"] }) } as Response));
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("region", { name: "현재 작업" })).toHaveTextContent("복구된 계획"));
+    expect(screen.getByRole("region", { name: "현재 작업" })).toHaveTextContent("수신된 활동 기록 없음");
+    expect(screen.getByRole("button", { name: /1단계 요청 확인/ })).toHaveTextContent("기록 없음");
+  });
+  it("uses restrained core copy and keeps detailed logs secondary", async () => {
+    render(<App />);
+    await screen.findByText("공개 기업 자료");
+    for (const name of ["Research", "Progress", "Sources", "Report"]) {
+      expect(screen.getByRole("heading", { name })).toBeVisible();
+    }
+    expect(screen.getByRole("button", { name: "수정 기록 보기" })).toHaveTextContent("History");
+    expect(screen.getByRole("button", { name: "조사 시작" })).toBeDisabled();
+    expect(screen.queryByRole("complementary", { name: "작업 공간" })).not.toBeInTheDocument();
+    expect(document.querySelector(".activity-details")).not.toHaveAttribute("open");
+    expect(screen.queryByText(/좋은 조사는|계획하고, 조사하고|독립 구현|독립 리서치 프로토타입/)).not.toBeInTheDocument();
+    const rail = screen.getByRole("list", { name: "조사 단계" });
+    for (const label of ["요청 확인", "조사 계획", "자료 수집", "보고서 작성", "검토"]) {
+      expect(within(rail).getByRole("button", { name: new RegExp(label) })).toBeVisible();
+    }
+    expect(screen.getByRole("region", { name: "현재 작업" })).toHaveTextContent("아직 시작하지 않았습니다");
   });
 });
