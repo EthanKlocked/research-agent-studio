@@ -15,7 +15,7 @@ from backend.schemas import RunRequest
 def create_app(settings=None, frontend_dir=None):
     settings = settings or Settings.from_env()
     manager = RunManager(settings)
-    dataset = json.loads((ROOT / "data/apple_fy2024.json").read_text())
+    dataset = json.loads((ROOT / "data/apple_fy2024.json").read_text(encoding="utf-8"))
     dist = Path(frontend_dir) if frontend_dir else ROOT / "frontend/dist"
 
     @asynccontextmanager

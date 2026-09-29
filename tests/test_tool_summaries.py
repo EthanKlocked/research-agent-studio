@@ -31,7 +31,7 @@ def test_input_summaries_never_echo_untrusted_arguments():
     summary = tool_input_summary("search_documents", {"query": secret, "limit": secret})
     assert secret not in summary and len(summary) <= 160
     assert secret not in tool_input_summary("get_section", {"document_id": secret, "section_id": secret})
-    data = json.loads((Path(__file__).resolve().parents[1] / "data/apple_fy2024.json").read_text())
+    data = json.loads((Path(__file__).resolve().parents[1] / "data/apple_fy2024.json").read_text(encoding="utf-8"))
     section = data["sections"][0]
     summary = tool_input_summary("get_section", section)
     assert section["document_id"] in summary and section["section_id"] in summary

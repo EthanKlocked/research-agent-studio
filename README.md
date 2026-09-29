@@ -22,7 +22,7 @@ cd research-agent-studio
 .\scripts\start.ps1 -TestMode
 ```
 
-PowerShell 스크립트는 정적 계약 테스트만 했으며 **Windows 실기기 실행은 아직 검증하지 않았습니다**. 실행 정책 때문에 스크립트가 차단되면 시스템 정책을 바꾸지 말고 아래 명령을 직접 실행할 수 있습니다.
+PowerShell 스크립트는 로컬 개발 환경에서 정적 계약 테스트를 했습니다. 별도 **Windows PowerShell 5.1 / Python 3.12.14 환경의 실행 결과가 보고**되었지만, 당시 커밋·로컬 수정 여부가 확인되지 않아 **현재 커밋의 Windows 검증 완료를 의미하지는 않습니다**. 발견된 인코딩·테스트 호환성 문제와 확인 범위는 [검증 문서](docs/verification.md)를 참고하세요. 실행 정책 때문에 스크립트가 차단되면 시스템 정책을 바꾸지 말고 아래 명령을 직접 실행할 수 있습니다.
 
 ```powershell
 uv sync --locked --extra dev

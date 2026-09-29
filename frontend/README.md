@@ -33,4 +33,4 @@ Fixtures exist **only in test files**. Test-mode progress and results always arr
 
 Verified on macOS: clean `npm ci`, all tests, standalone TypeScript check, production build, and `npm audit` with zero vulnerabilities. Lockfile resolves React 19.1.0, Vite 6.4.3 and Vitest 4.1.11.
 
-Browser checks against the real backend covered 1366×768, 1440×900 and 390px widths, revision/source interactions, page reload and cancellation. See [verification scope](../docs/verification.md). Component tests mock the transport and are not proof of live-provider E2E execution. Live-provider verification requires operator-local configuration; Windows execution is not yet verified.
+Browser checks against the real backend covered 1366×768, 1440×900 and 390px widths, revision/source interactions, page reload and cancellation. See [verification scope](../docs/verification.md). Component tests mock the transport and are not proof of live-provider E2E execution. Live-provider verification requires operator-local configuration. Separate Windows execution feedback is documented with its unknown-commit/local-adjustment limitations; it does not establish current-commit Windows verification.
