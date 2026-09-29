@@ -4,6 +4,7 @@ export type Status =
   | "success"
   | "limit_reached"
   | "empty"
+  | "out_of_scope"
   | "error"
   | "cancelled";
 export type Stage =

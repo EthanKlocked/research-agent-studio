@@ -63,8 +63,9 @@ async def test_slow_drip_obeys_absolute_deadline_and_closes(monkeypatch):
     server, store, stream = provider()
     start = time.monotonic()
     try:
-        with pytest.raises(Exception, match="timeout"):
-            await server.call_tool("web_search", {"query": "offline"})
+        result = await server.call_tool("web_search", {"query": "offline"})
+        assert result.isError
+        assert result.structuredContent == {"web_failure": {"category": "timeout"}}
         elapsed = time.monotonic() - start
         assert elapsed < .3, f"20ms deadline took {elapsed:.3f}s; consumed={stream.consumed}"
         assert stream.closed and stream.consumed < 100

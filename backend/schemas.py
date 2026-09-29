@@ -1,4 +1,5 @@
 from typing import Annotated, Literal
+from backend.errors import OutputValidation
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Text = Annotated[str, Field(min_length=1, max_length=2500)]
@@ -21,6 +22,8 @@ class RunRequest(Strict):
 
 class Interpretation(Strict):
     interpreted_request: Text
+    # Missing legacy outputs remain undecided, never implicitly rejected.
+    scope: Literal["in_scope", "partial", "unknown", "out_of_scope"] = "unknown"
 
 class Plan(Strict):
     plan: Annotated[list[Short], Field(min_length=1, max_length=6)]
@@ -47,7 +50,7 @@ ROLE_SCHEMAS = {"Listener": Interpretation, "Planner": Plan, "Researcher": Resea
 
 def validate_citations(report, evidence, *, validator=None):
     if validator is not None and any(not validator(e) for e in evidence):
-        raise ValueError("Unregistered citation evidence")
+        raise OutputValidation("Unregistered citation evidence")
     ids = {e["id"] for e in evidence}
     if any(not set(c["citation_ids"]).issubset(ids) for c in report["claims"]):
-        raise ValueError("Unknown citation ID")
+        raise OutputValidation("Unknown citation ID")

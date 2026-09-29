@@ -17,6 +17,7 @@ const statusText = {
   success: "조사가 완료되었습니다",
   limit_reached: "반복 한도에 도달했습니다",
   empty: "관련 근거를 찾지 못했습니다",
+  out_of_scope: "현재 자료 범위를 벗어난 질문입니다",
   error: "조사 중 오류가 발생했습니다",
   cancelled: "실행이 중단되었습니다",
 };
@@ -483,7 +484,9 @@ export default function App() {
                 </div>
                 <p className="eyebrow">FROM QUESTION TO EVIDENCE</p>
                 <h3>
-                  {s?.status === "empty"
+                  {s?.status === "out_of_scope"
+                    ? "허용된 자료로 답할 수 있는 질문으로 바꿔 주세요"
+                    : s?.status === "empty"
                     ? "자료 범위를 바꿔 다시 질문해 보세요"
                     : s?.status === "error"
                       ? "조사를 완료하지 못했습니다"
@@ -494,7 +497,9 @@ export default function App() {
                           : "좋은 조사는, 좋은 질문에서 시작됩니다."}
                 </h3>
                 <p>
-                  {active
+                  {s?.status === "out_of_scope"
+                    ? "일반 웹 검색이 꺼져 있어 현재 제공된 자료만 조사할 수 있습니다. 도구 오류나 검색 결과 없음과는 다릅니다."
+                    : active
                     ? "실행 단계와 작업 노트에서 실제 진행 상황을 확인할 수 있습니다."
                     : "질문을 입력하면 조사 계획부터 출처를 담은 보고서까지 이곳에 정리됩니다."}
                 </p>

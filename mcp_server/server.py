@@ -1,6 +1,9 @@
 """Read-only allowlisted data tools. No arbitrary paths, URLs, shell or SQL."""
 import asyncio
 import os
+import json
+from mcp.types import CallToolResult, TextContent
+from mcp_server.general_web import GeneralWebError
 from mcp_server.dataset import DATA, SECTIONS
 from mcp_server.tool_schemas import SearchQuery, SearchLimit, SectionIdentifier, SourceIdentifier, DEFAULT_SEARCH_LIMIT
 from mcp.server.fastmcp import FastMCP
@@ -43,18 +46,34 @@ async def get_section_tool(document_id: SectionIdentifier, section_id: SectionId
 
 def register_general_tools(server, store):
     """Register only on an explicitly configured, run-local server instance."""
-    @server.tool(name="web_search")
+    @server.resource("research://run/web-budget")
+    def web_budget() -> str:
+        return json.dumps(store.remaining_budget())
+
+    def failure(exc):
+        # Explicit typed envelope, never FastMCP exception prose.
+        return CallToolResult(isError=True, content=[TextContent(type="text", text="General web retrieval failed")],
+                              structuredContent={"web_failure": {"category": exc.category}})
+
+    @server.tool(name="web_search", structured_output=False)
     async def web_search(query: SearchQuery, limit: SearchLimit = DEFAULT_SEARCH_LIMIT) -> list[dict]:
         """Search general public topics via Exa. Returns metadata and run-local source IDs, never evidence. Use read_page for contents. No fallback."""
-        return await store.web_search(query, limit)
+        try:
+            value = await store.web_search(query, limit)
+            return CallToolResult(isError=False, content=[TextContent(type="text", text=json.dumps(value))], structuredContent={"result":value})
+        except GeneralWebError as exc:
+            return failure(exc)
 
-    @server.tool(name="read_page")
+    @server.tool(name="read_page", structured_output=False)
     async def read_page(source_id: SourceIdentifier) -> dict:
         """Retrieve extracted page evidence for an exact source_id from this run's web_search. URLs and unknown IDs are forbidden. Dates may be unknown."""
-        value = await store.read_page(source_id)
+        try:
+            value = await store.read_page(source_id)
+        except GeneralWebError as exc:
+            return failure(exc)
         if not store.validate_evidence(value):
             raise ValueError("Invalid retrieved evidence")
-        return value
+        return CallToolResult(isError=False, content=[TextContent(type="text", text=json.dumps(value))], structuredContent=value)
 
 
 async def _main():

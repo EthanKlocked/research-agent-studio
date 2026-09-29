@@ -2,7 +2,8 @@
 from pydantic import ValidationError
 from httpx import TimeoutException
 from openai import APITimeoutError
-from backend.mcp_client import ToolFailure
+from backend.mcp_client import ToolFailure, WebToolFailure
+from mcp_server.general_web import WEB_FAILURE_CATEGORIES
 
 class OutputLimit(ValueError):
     pass
@@ -44,6 +45,15 @@ def error_category(exc):
         elif isinstance(current, ToolFailure):
             categories.add("tool")
     return next((c for c in ("output_limit", "validation", "retrieval_incomplete", "tool") if c in categories), "provider_or_execution")
+
+
+def safe_web_category(exc):
+    for current in exception_chain(exc):
+        if isinstance(current, WebToolFailure):
+            category = current.web_category
+            if type(category) is str and category in WEB_FAILURE_CATEGORIES:
+                return category
+    return "none"
 
 
 def safe_exception_classes(exc):
