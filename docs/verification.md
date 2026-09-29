@@ -3,7 +3,7 @@
 ## Executed on macOS
 
 - Locked Python install and clean npm install; TypeScript check and production build passed.
-- Python suite: 211 passing tests, including 11 static PowerShell-launcher contract tests. Core tests include actual LangGraph/LangChain execution and real MCP stdio initialization, discovery, search and section retrieval.
+- Python suite: 221 passing tests, including 11 static PowerShell-launcher contract tests. Core tests include actual LangGraph/LangChain execution and real MCP stdio initialization, discovery, search and section retrieval.
 - Frontend suite: 32 passing tests covering snapshots, streaming, reconnect, terminal lifecycle, revision selection, safe tool summaries and live-mode request selection.
 - Browser checks at 1440×900 and 1366×768, plus 390px mobile: revise → retained evidence → second report; source links; revision comparison; page reload; pass/limit/empty/tool-error states and cancellation.
 - Three browser-triggered cancellations finalized as cancelled with finish timestamps and no errors. No horizontal mobile overflow or browser console errors observed.
@@ -30,6 +30,10 @@ Full `bash scripts/test.sh` on macOS: **211 Python passed in 27.33s**, **32 fron
 Actual public Apple HTTP through real MCP stdio was independently repeated; see [source smoke evidence](../data/public_source_smoke.md). Both fixed documents returned parsed facts and cache lineage. No real LLM was called. Poppler was already installed on this Mac; Windows parser availability remains unverified.
 
 Browser QA used real graph/MCP/API/SSE and deterministic model responses. A local-only harness injected a Researcher timeout at revision 2: prior report/evidence, non-pass banner, unresolved evaluation and timeout message remained visible, including after reload. A subsequent ordinary revise scenario completed with a second report. [Partial result screenshot](partial-result-1440.png) is 1280px wide (legacy filename), from the injected-error test—not a live-model failure. QA page and server were closed afterward.
+
+## MCP contract refactor
+
+Full `bash scripts/test.sh` on macOS: **221 Python passed in 30.15s**, **32 frontend passed**, TypeScript/build passed. `uv pip check` reported compatible installed packages. Adapter 0.3.2 is the only added lockfile package; no existing package versions changed. Tests exercise real MCP discovery and model metadata parity, inventory mismatch/duplicate rejection, bounded discovery/cancellation, no adapter double-dispatch and existing safety controls. OpenAI wire conversion removes JSON Schema titles; parity tests normalize only those titles at the wire layer and require exact adapter schema parity. No new live-provider, public-source or browser run was performed for this internal refactor.
 
 ## Windows boundary
 

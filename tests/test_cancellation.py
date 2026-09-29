@@ -93,7 +93,7 @@ async def test_assert_reaped_rejects_wait_timeout_without_pid_probe(no_pid_probe
         await assert_reaped([StuckHandle()])
 
 
-@pytest.mark.parametrize("phase", ["startup", "model_wait", "cleanup_error"])
+@pytest.mark.parametrize("phase", ["startup", "discovery", "model_wait", "cleanup_error"])
 async def test_cancel_real_mcp_lifecycle(phase, monkeypatch, mcp_processes):
     from backend.agents import FixtureModel
     from langchain_core.messages import ToolMessage
@@ -113,6 +113,15 @@ async def test_cancel_real_mcp_lifecycle(phase, monkeypatch, mcp_processes):
                 raise
 
         monkeypatch.setattr(ClientSession, "initialize", initialize)
+    elif phase == "discovery":
+        original = ClientSession.list_tools
+
+        async def listing(self, *args, **kwargs):
+            await original(self, *args, **kwargs)
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(ClientSession, "list_tools", listing)
     else:
         original = FixtureModel._agenerate
 

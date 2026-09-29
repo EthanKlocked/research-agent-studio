@@ -16,6 +16,12 @@ Per-run shared state includes request interpretation, plan, deduplicated evidenc
 
 Evaluator outcomes can appear before workflow cleanup. A final lifecycle snapshot with `finished_at`, or an explicit terminal event, determines completed UI state. Cancellation records intent before signalling the actual task and publishes one terminal event after cleanup. Provider-side immediate cancellation is not guaranteed.
 
+## MCP contract ownership
+
+`langchain-mcp-adapters==0.3.2` loads server contracts with `load_mcp_tools(session)` under the discovery deadline before Researcher invocation. The independent client ALLOWED policy rejects extra, missing or duplicate tool names. Server definitions own model-visible names/descriptions/schemas; workflow no longer redeclares tools.
+
+Shared `mcp_server/tool_schemas.py` defines strict argument constraints/defaults; `mcp_server/dataset.py` centralizes dataset loading, IDs and dynamic scope. Separate processes may each load their own dataset copy. The existing raw-call middleware remains the sole execution path through DocumentClient, retaining budgets, lock ordering, recovery, events and result validation. Adapter executable callbacks are not used by this workflow.
+
 ## Observation API
 
 - `GET /api/config`: safe configured/missing status, historical dataset date, limits.

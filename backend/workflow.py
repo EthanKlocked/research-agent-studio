@@ -3,14 +3,13 @@ from copy import deepcopy
 import json
 from typing import TypedDict
 from langgraph.graph import StateGraph, START, END
-from langchain_core.tools import tool
 from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
 from backend.agents import RoleRunner
 from backend.errors import RetrievalIncomplete
 from backend.mcp_client import (
     document_session, ToolFailure, RecoverableToolError,
-    SearchArguments, SectionArguments, SECTION_IDS,
+    SECTION_IDS,
 )
 from backend.schemas import ROLE_SCHEMAS, validate_citations
 
@@ -84,23 +83,18 @@ def build_graph(settings, mode, scenario, publish):
                     evidence[result["id"]] = result
                 await publish("tool_complete", state, {"tool":name, "count":len(result) if isinstance(result, list) else 1})
                 return result
-            @tool(args_schema=SearchArguments)
-            async def search_documents(query: str, limit: int = 5) -> list[dict]:
-                """Search historical summaries for metadata only; call get_section for evidence. query <=300 chars, limit 1..5."""
-                return await invoke_tool("search_documents", {"query":query, "limit":limit})
-            @tool(args_schema=SectionArguments)
-            async def get_section(document_id: str, section_id: str) -> dict:
-                """Read one allowlisted document section, using IDs from search results."""
-                return await invoke_tool("get_section", {"document_id":document_id, "section_id":section_id})
+            tools = await client.load_tools()
             @wrap_tool_call
             async def document_tools(request, handler):
                 # Route before LangChain coercion/default error handling: every raw
                 # attempt reaches the bounded local validator, including unknown tools.
+                # Adapter tools supply metadata only: do NOT call handler, which
+                # would bypass DocumentClient or dispatch the same request twice.
                 call = request.tool_call
                 result = await invoke_tool(call["name"], call["args"])
                 return ToolMessage(content=json.dumps(result, ensure_ascii=False), tool_call_id=call["id"], name=call["name"], status="error" if isinstance(result, dict) and "error" in result else "success")
 
-            output = await runner.invoke("Researcher", state, [search_documents, get_section], middleware=[document_tools])
+            output = await runner.invoke("Researcher", state, tools, middleware=[document_tools])
             if failures or client.unresolved_error:
                 raise ToolFailure("Document tool failed")
             if client.calls == 0:
