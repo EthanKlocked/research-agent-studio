@@ -62,12 +62,12 @@ async def test_model_validation_and_provider_errors_are_not_success(monkeypatch)
     from backend.agents import RoleRunner
     original = RoleRunner.invoke
     for role, bad in [("Reporter", {"title":"x", "summary":"x", "claims":[{"text":"x", "citation_ids":["invented"]}], "limitations":[]}), ("Evaluator", {"decision":"maybe", "issues":[], "follow_up":[]}), ("Listener", RuntimeError("sensitive-config-secret"))]:
-        async def broken(self, current_role, state, tools, role=role, bad=bad):
+        async def broken(self, current_role, state, tools, role=role, bad=bad, **kwargs):
             if current_role == role:
                 if isinstance(bad, Exception):
                     raise bad
                 return bad
-            return await original(self, current_role, state, tools)
+            return await original(self, current_role, state, tools, **kwargs)
         monkeypatch.setattr(RoleRunner, "invoke", broken)
         _, result = await run_case()
         assert result["status"] == "error"

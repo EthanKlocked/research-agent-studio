@@ -24,6 +24,7 @@ const eventLabels: Record<string, string> = {
   node_complete: "단계 완료",
   tool_start: "도구 호출",
   tool_complete: "도구 완료",
+  tool_error: "도구 입력 오류",
   evaluation: "결과 평가",
   branch: "분기 결정",
   terminal: "실행 종료",
@@ -163,7 +164,7 @@ export default function App() {
   const evidenceUrl = evidence ? safeUrl(evidence.url) : null;
   const actualMode = s?.mode ?? mode;
   const tools = run.events.filter(
-    (e) => e.type === "tool_start" || e.type === "tool_complete",
+    (e) => e.type === "tool_start" || e.type === "tool_complete" || e.type === "tool_error",
   );
   const currentLabel = active
     ? (stages.find((stage) => stage.id === s?.stage)?.active ?? "실행 대기 중")
@@ -605,18 +606,25 @@ export default function App() {
                 <ul className="tool-list">
                   {tools.slice(-8).map((e) => (
                     <li key={e.seq}>
-                      <span>{e.type === "tool_complete" ? "✓" : "↗"}</span>
+                      <span aria-hidden="true">
+                        {e.type === "tool_error" ? "⚠" : e.type === "tool_complete" ? "✓" : "↗"}
+                      </span>
                       <div>
                         {e.data.tool_name || e.data.tool || "자료 조회"}
                         {e.data.input_summary && <small>{e.data.input_summary}</small>}
                         <small>
-                          {e.type === "tool_complete"
-                            ? "조회 완료"
-                            : "호출 시작"}
+                          {e.type === "tool_error"
+                            ? "도구 입력 오류"
+                            : e.type === "tool_complete"
+                              ? "조회 완료"
+                              : "호출 시작"}
                           {typeof e.data.count === "number"
                             ? ` · ${e.data.count}건`
                             : ""}
                         </small>
+                        {e.type === "tool_error" && e.data.reason && (
+                          <small>{e.data.reason}</small>
+                        )}
                       </div>
                     </li>
                   ))}
