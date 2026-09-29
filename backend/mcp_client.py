@@ -6,30 +6,16 @@ import shutil
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
+from langchain_mcp_adapters.tools import load_mcp_tools
+from mcp_server.tool_schemas import SearchArguments, SectionArguments
+from mcp_server.dataset import DATA, SECTION_IDS, get_dataset_scope
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp_server.public_sources import CATALOG, PUBLIC_SECTION_IDS, UnavailableSource, public_sources_enabled
+from mcp_server.public_sources import UnavailableSource, public_sources_enabled
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {"search_documents", "get_section"}
-DATA = json.loads((ROOT / "data/apple_fy2024.json").read_text(encoding="utf-8"))
-SECTION_IDS = frozenset((s["document_id"], s["section_id"]) for s in DATA["sections"]) | PUBLIC_SECTION_IDS
-DATASET_SCOPE = {
-    "name": DATA["name"], "as_of": DATA["as_of"], "scope": DATA["scope"],
-    "period_note": "FY2024 Q4 is a completed historical quarter ending 2024-09-28. as_of is the reporting period end, not publication or knowledge cutoff. Use each document's published_at; these are reported results, not future estimates.",
-    "available_documents": [{k:s[k] for k in ("document_id", "section_id", "title", "published_at")} for s in DATA["sections"]],
-}
-
-def get_dataset_scope(*, enabled=None):
-    """Resolve after dotenv loading; only enabled public metadata is discoverable."""
-    enabled = public_sources_enabled() if enabled is None else enabled
-    return {**DATASET_SCOPE, "public_sources_enabled": enabled,
-            "scope": DATA["scope"] + (" Exact official Apple FY2024 Q4 documents may be fetched on demand; catalog metadata is not evidence." if enabled else ""),
-            "available_documents": DATASET_SCOPE["available_documents"] +
-            ([{k: s[k] for k in ("document_id", "section_id", "title", "published_at", "url", "retrieval_status")} for s in CATALOG] if enabled else [])}
-
 def document_environment(*, enabled=None):
     """Forward an explicit boolean and resolved parser path, never model secrets."""
     env = {"PATH": os.defpath, "PYTHONIOENCODING": "utf-8", "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false"}
@@ -46,17 +32,6 @@ class ToolFailure(Exception):
 class RecoverableToolError(ToolFailure):
     """Only locally verified argument/identifier mistakes, never remote errors."""
 
-class ToolArguments(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-class SearchArguments(ToolArguments):
-    query: Annotated[str, Field(min_length=1, max_length=300)]
-    limit: Annotated[int, Field(ge=1, le=5)] = 5
-
-class SectionArguments(ToolArguments):
-    document_id: Annotated[str, Field(min_length=1, max_length=80)]
-    section_id: Annotated[str, Field(min_length=1, max_length=80)]
-
 class DocumentClient:
     def __init__(self, session, timeout=10, max_tool_calls=12, max_tool_corrections=2):
         self.session = session
@@ -70,9 +45,16 @@ class DocumentClient:
         # ordering deterministic, and never let an older retrieval clear an error.
         self._lock = asyncio.Lock()
 
+    async def load_tools(self):
+        """Discover server contracts under one deadline; fail closed before binding."""
+        tools = await asyncio.wait_for(load_mcp_tools(self.session), self.timeout)
+        names = [tool.name for tool in tools]
+        if len(names) != len(ALLOWED) or set(names) != ALLOWED:
+            raise ToolFailure("Invalid document tool inventory")
+        return tools
+
     async def list_tools(self):
-        result = await asyncio.wait_for(self.session.list_tools(), self.timeout)
-        return [tool.name for tool in result.tools]
+        return [tool.name for tool in await self.load_tools()]
 
     async def call(self, name, arguments):
         async with self._lock:

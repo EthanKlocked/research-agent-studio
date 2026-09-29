@@ -15,6 +15,10 @@ ARGS = {'document_id': PDF_ID, 'section_id': 'operations'}
 UNAVAILABLE = {**ARGS, 'retrieval_status': 'unavailable', 'reason': 'public_source_unavailable'}
 
 class DispatchSession:
+    async def list_tools(self, cursor=None):
+        from mcp.types import ListToolsResult
+        return ListToolsResult(tools=await server.mcp.list_tools())
+
     async def call_tool(self, name, args):
         result = await server.mcp.call_tool(name, args)
         content, structured = result if isinstance(result, tuple) else (result, None)

@@ -6,7 +6,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call
 from pydantic import ValidationError
 from backend.errors import OutputLimit, OutputValidation
-from backend.mcp_client import get_dataset_scope
+from mcp_server.dataset import get_dataset_scope
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
