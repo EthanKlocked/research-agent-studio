@@ -15,7 +15,8 @@ export type Stage =
 export interface Config {
   configured: boolean;
   test_mode_available: boolean;
-  dataset: { name: string; as_of: string };
+  capabilities: { general_web: boolean; search_provider: "exa" | null };
+  dataset: { name: string; as_of: string | null };
   limits: { max_iterations: number };
 }
 export interface Evidence {
@@ -24,8 +25,9 @@ export interface Evidence {
   section_id: string;
   title: string;
   url: string;
-  published_at: string;
-  as_of: string;
+  published_at?: string | null;
+  as_of?: string | null;
+  provenance?: string | null;
   excerpt: string;
 }
 export interface Report {
@@ -64,6 +66,7 @@ export interface Snapshot {
   evaluation: Evaluation | null;
   feedback: string[];
   errors: string[];
+  unavailable_sources?: { document_id: string; section_id: string; retrieval_status: "unavailable"; reason: "public_source_unavailable" }[];
   partial_result?: { iteration: number; reason: "revision_failed" } | null;
 }
 export interface RunEvent {
@@ -81,5 +84,15 @@ export interface RunEvent {
     changed_fields?: string[];
     reason?: string;
     branch?: string;
+    role?: Stage;
+    model_call_id?: string;
+    purpose?: "planner_context" | "research_execution";
+    tool_count?: number;
+    scope?: "output_schema" | "citations";
+    tool_call_id?: string;
+    attempt?: number;
+    duration_ms?: number;
+    decision?: string;
+    retrieval_status?: string;
   };
 }

@@ -112,7 +112,12 @@ async def test_provider_real_stdio_fatal_failures(monkeypatch, failure):
     assert state["status"] == ("cancelled" if failure == "cancel" else "error"), state
     assert calls == ["search_documents"]
     assert state["report"] is None and state["evidence"] == []
-    assert not any(e["type"] in ("tool_error", "tool_complete") for e in events)
+    assert not any(e["type"] == "tool_complete" for e in events)
+    errors = [e for e in events if e["type"] == "tool_error"]
+    assert len(errors) == (0 if failure == "cancel" else 1)
+    if errors:
+        start = next(e for e in events if e["type"] == "tool_start")
+        assert errors[0]["data"]["tool_call_id"] == start["data"]["tool_call_id"]
     assert "private-secret" not in json.dumps(events)
 
 
@@ -136,7 +141,7 @@ async def test_search_alone_cannot_clear_failed_retrieval(monkeypatch):
 async def test_invalid_attempts_share_total_budget(monkeypatch, args):
     state, events, _ = await run_provider(monkeypatch, [("search_documents",args), GOOD], max_tool_calls=1)
     assert state["status"] == "error"
-    assert sum(e["type"] == "tool_error" for e in events) == 1
+    assert sum(e["type"] == "tool_error" for e in events) == 2
     assert not any(e["type"] == "tool_complete" for e in events)
 
 
@@ -168,7 +173,7 @@ async def test_real_stdio_provider_correction(monkeypatch, prefix):
     assert len(errors) == len(prefix)
     for event in errors:
         assert event["data"]["reason"] == "입력 오류로 재조회가 필요합니다."
-        assert set(event["data"]) == {"tool", "reason", "snapshot"}
+        assert set(event["data"]) == {"tool", "reason", "snapshot", "tool_call_id"}
     assert "private-secret" not in json.dumps(events)
     tool_messages = [m for r in requests for m in r["messages"] if m["role"] == "tool"]
     assert tool_messages

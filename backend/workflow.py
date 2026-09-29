@@ -1,5 +1,8 @@
 """Real LangGraph outer workflow. Each node returns validated partial state."""
 from copy import deepcopy
+from contextlib import asynccontextmanager
+import asyncio
+from uuid import uuid4
 import json
 from typing import TypedDict
 from langgraph.graph import StateGraph, START, END
@@ -9,14 +12,14 @@ from backend.agents import RoleRunner
 from backend.errors import RetrievalIncomplete
 from backend.mcp_client import (
     document_session, ToolFailure, RecoverableToolError,
-    SECTION_IDS,
+    SECTION_IDS, planner_tool_metadata,
 )
 from backend.schemas import ROLE_SCHEMAS, validate_citations
 
 
 def tool_input_summary(name, arguments):
     """Public metadata only: never echo arbitrary model-authored arguments."""
-    if name == "search_documents":
+    if name in ("search_documents", "web_search"):
         query, limit = arguments.get("query"), arguments.get("limit")
         length = len(query) if isinstance(query, str) else 0
         cap = str(limit) if type(limit) is int and 1 <= limit <= 5 else "유효하지 않음"
@@ -26,6 +29,8 @@ def tool_input_summary(name, arguments):
         if isinstance(doc, str) and isinstance(section, str) and (doc, section) in SECTION_IDS:
             return f"자료 구간 조회 · {doc} / {section}"[:160]
         return "자료 구간 조회 · 허용되지 않은 식별자"
+    if name == "read_page":
+        return "검색으로 등록된 자료 본문 조회"
     return "허용되지 않은 도구"
 
 
@@ -50,40 +55,75 @@ class WorkflowState(TypedDict):
     errors: list[str]
     partial_result: dict | None
 
-def build_graph(settings, mode, scenario, publish):
+def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
     runner = RoleRunner(settings, mode, scenario)
+    runner.publish = publish
+
+    async def discover(state, client, purpose):
+        await publish("discovery_start", state, {"purpose": purpose})
+        tools = await client.load_tools()
+        metadata = planner_tool_metadata(tools)
+        await publish("discovery_complete", state, {"purpose": purpose, "tool_count": len(tools)})
+        return tools, metadata
+
+    @asynccontextmanager
+    async def research_session():
+        if persistent_client is not None:
+            persistent_client.reset_budget()
+            yield persistent_client
+        else:
+            async with document_session(timeout=settings.mcp_timeout, max_tool_calls=settings.max_tool_calls, max_tool_corrections=settings.max_tool_corrections, enabled=False if mode == "test" else None) as client:
+                yield client
+
+    async def planner_inventory(state):
+        if persistent_client is not None:
+            _, runner.tool_inventory = await discover(state, persistent_client, "planner_context")
+            return
+        # A short independent session; only detached metadata survives its closure.
+        # One deadline includes subprocess startup, initialize and all list pages.
+        async with asyncio.timeout(settings.mcp_timeout):
+            async with document_session(timeout=settings.mcp_timeout, max_tool_calls=settings.max_tool_calls, max_tool_corrections=settings.max_tool_corrections, enabled=False if mode == "test" else None) as client:
+                _, metadata = await discover(state, client, "planner_context")
+        runner.tool_inventory = metadata
 
     async def research(state):
         evidence = {e["id"]: e for e in state["evidence"]}
         unavailable = {(s["document_id"], s["section_id"]): s for s in state.get("unavailable_sources", [])}
         failures = []
         search_hits = []
-        async with document_session(timeout=settings.mcp_timeout, max_tool_calls=settings.max_tool_calls, max_tool_corrections=settings.max_tool_corrections, enabled=False if mode == "test" else None) as client:
+        async with research_session() as client:
             async def invoke_tool(name, args):
-                public_name = name if name in ("search_documents", "get_section") else "unknown"
-                await publish("tool_start", state, {"tool":public_name, "input_summary":tool_input_summary(name, args)})
+                public_name = name if name in ("search_documents", "get_section", "web_search", "read_page") else "unknown"
+                call_id = uuid4().hex
+                public = {"tool": public_name, "tool_call_id": call_id}
+                await publish("tool_start", state, {**public, "input_summary":tool_input_summary(name, args)})
                 try:
                     result = await client.call(name, args)
                 except RecoverableToolError:
-                    await publish("tool_error", state, {"tool":name, "reason":"입력 오류로 재조회가 필요합니다."})
+                    await publish("tool_error", state, {**public, "reason":"입력 오류로 재조회가 필요합니다."})
                     return {"error":{"code":"invalid_tool_input", "message":"Check tool arguments and search for valid document/section IDs before retrieving again."}}
                 except Exception as exc:
                     failures.append(exc)
+                    await publish("tool_error", state, {**public, "reason": "자료 조회 도구가 실패했습니다."})
                     raise
-                if name == "search_documents":
+                if name in ("search_documents", "web_search"):
                     search_hits.extend(result)
                 if name == "get_section":
                     key = (args["document_id"], args["section_id"])
                     if result.get("retrieval_status") == "unavailable":
                         unavailable[key] = result
                         state["unavailable_sources"] = list(unavailable.values())
-                        await publish("tool_complete", state, {"tool":name, "count":0, "retrieval_status":"unavailable"})
+                        await publish("tool_complete", state, {**public, "count":0, "retrieval_status":"unavailable"})
                         return result
                     unavailable.pop(key, None)
                     evidence[result["id"]] = result
-                await publish("tool_complete", state, {"tool":name, "count":len(result) if isinstance(result, list) else 1})
+                if name == "read_page":
+                    if not client.validate_evidence(result):
+                        raise ToolFailure("Unregistered evidence")
+                    evidence[result["id"]] = result
+                await publish("tool_complete", state, {**public, "count":len(result) if isinstance(result, list) else 1})
                 return result
-            tools = await client.load_tools()
+            tools, _ = await discover(state, client, "research_execution")
             @wrap_tool_call
             async def document_tools(request, handler):
                 # Route before LangChain coercion/default error handling: every raw
@@ -113,13 +153,22 @@ def build_graph(settings, mode, scenario, publish):
             if role == "Planner":
                 current["iteration"] += 1
             await publish("node_start", current, {})
+            if role == "Planner" and runner.tool_inventory is None:
+                await planner_inventory(current)
             if role == "Researcher":
                 updates = await research(current)
             else:
                 raw = await runner.invoke(role, current, [])
                 value = ROLE_SCHEMAS[role].model_validate(raw).model_dump()
                 if role == "Reporter":
-                    validate_citations(value, current["evidence"])
+                    validation = {"role": role, "scope": "citations"}
+                    await publish("validation_start", current, validation)
+                    try:
+                        validate_citations(value, current["evidence"], validator=persistent_client.validate_evidence if persistent_client is not None else None)
+                    except ValueError:
+                        await publish("validation_error", current, validation)
+                        raise
+                    await publish("validation_complete", current, validation)
                     # Reserve a bounded deterministic limitation even if the model
                     # omits optional failures. These identifiers are never citations.
                     sources = current.get("unavailable_sources", [])

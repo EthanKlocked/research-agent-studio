@@ -2,6 +2,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
   fireEvent,
   act,
 } from "@testing-library/react";
@@ -53,12 +54,18 @@ async function start() {
   return Stream.instances[0];
 }
 describe("workbench", () => {
+  it("directs developer details readers to the visible event timeline", async () => {
+    await start();
+    fireEvent.click(screen.getByText("개발 상세"));
+    expect(screen.getByText("실행 이벤트와 State 변경 내역은 작업 타임라인에서 확인하세요. 최대 150건만 표시합니다.")).toBeVisible();
+  });
   it.each(["stream", "restore"])("keeps a failed revision's retained report and error visible via %s", async (delivery) => {
     const report = { title: "보존된 보고서", summary: "이전 평가를 받은 요약",
       claims: [{ text: "보존된 주장", citation_ids: ["e1"] }], limitations: ["아직 자료가 부족합니다"] };
     const evaluation = { decision: "revise" as const, issues: ["위험 근거 부족"], follow_up: ["추가 조회 필요"] };
     const retained = snapshot({ status: "error", iteration: 2, last_seq: 9,
-      finished_at: new Date().toISOString(), report, evaluation,
+      finished_at: new Date().toISOString(),
+      report: { ...report, limitations: [...report.limitations, "후속 수정 실행이 실패하여 이전 검증 보고서를 보존했습니다. 평가 통과가 아니며 미해결 이슈가 남아 있습니다."] }, evaluation,
       partial_result: { iteration: 1, reason: "revision_failed" },
       errors: ["추가 조사 요청 시간이 초과되었습니다."],
       evidence: [{ id: "e1", document_id: "d1", section_id: "s1", title: "보존된 출처",
@@ -78,6 +85,9 @@ describe("workbench", () => {
     }
     expect(await screen.findByText("이전 보고서 · 추가 조사 실패 · 평가 미통과")).toBeVisible();
     expect(screen.getByText("보존된 보고서: 1차 보고서")).toBeVisible();
+    expect(screen.getByText("1차 검토본")).toBeVisible();
+    expect(screen.queryByText("평가 전 초안")).not.toBeInTheDocument();
+    expect(screen.getByText("후속 수정 실행이 실패하여 이전 검증 보고서를 보존했습니다. 평가 통과가 아니며 미해결 이슈가 남아 있습니다.")).toBeVisible();
     expect(screen.getByText("이전 평가를 받은 요약")).toBeVisible();
     expect(screen.getByText("보존된 주장")).toBeVisible();
     expect(screen.getByText("조사 중 오류가 발생했습니다")).toBeVisible();
@@ -94,16 +104,16 @@ describe("workbench", () => {
     expect(screen.getByText("완료 요약")).toBeVisible();
     expect(screen.queryByText("이전 보고서 · 추가 조사 실패 · 평가 미통과")).not.toBeInTheDocument();
   });
-  it("shows recoverable tool input errors without completing the lookup or run", async () => {
+  it.each(["도구 입력을 확인하고 다시 조회해 주세요.", "자료 조회 중 오류가 발생했습니다."])("labels uncategorized tool errors generically: %s", async (reason) => {
     const stream = await start();
-    const reason = "도구 입력을 확인하고 다시 조회해 주세요.";
+
     const running = snapshot({ status: "running", stage: "Researcher", last_seq: 2 });
     act(() => stream.onmessage?.({ data: JSON.stringify({
       run_id: running.run_id, seq: 2, type: "tool_error", timestamp: new Date().toISOString(),
       data: { snapshot: running, tool: "get_document", reason,
         arguments: { document_id: "private invalid ID" }, error: "private traceback" },
     }) }));
-    expect(screen.getByText("도구 입력 오류")).toBeVisible();
+    expect(within(screen.getByRole("complementary", { name: "작업 노트" })).getByText("도구 오류")).toBeVisible();
     expect(screen.getByText("⚠")).toBeVisible();
     expect(screen.getByText(reason)).toBeVisible();
     expect(screen.queryByText(/조회 완료|결과 0건/)).not.toBeInTheDocument();
@@ -111,8 +121,9 @@ describe("workbench", () => {
     expect(screen.getByText("근거 수집 중")).toBeVisible();
     expect(screen.getByRole("button", { name: "실행 중단" })).toBeEnabled();
     expect(stream.close).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("region", { name: "작업 타임라인" })).getByText(`도구 오류 · get_document · ${reason}`)).toBeVisible();
     fireEvent.click(screen.getByText("개발 상세"));
-    expect(screen.getByText(`도구 입력 오류 · get_document · ${reason}`)).toBeVisible();
+    expect(screen.getByText("실행 이벤트와 State 변경 내역은 작업 타임라인에서 확인하세요. 최대 150건만 표시합니다.")).toBeVisible();
     expect(screen.queryByText(/private invalid ID|private traceback/)).not.toBeInTheDocument();
 
     // An actual successful empty lookup remains distinct from the input error.
@@ -121,7 +132,7 @@ describe("workbench", () => {
       data: { snapshot: { ...running, last_seq: 3 }, tool: "search", count: 0 },
     }) }));
     expect(screen.getByText("조회 완료 · 0건")).toBeVisible();
-    expect(screen.getByText("도구 입력 오류")).toBeVisible();
+    expect(within(screen.getByRole("complementary", { name: "작업 노트" })).getByText("도구 오류")).toBeVisible();
     expect(stream.close).not.toHaveBeenCalled();
     act(() => stream.onmessage?.({ data: JSON.stringify({
       run_id: running.run_id, seq: 4, type: "tool_complete", timestamp: new Date().toISOString(),
@@ -135,7 +146,7 @@ describe("workbench", () => {
     act(() => stream.emit(snapshot({ last_seq: 6, status: "success", report,
       finished_at: new Date().toISOString() }), "terminal"));
     expect(screen.getByText("조사가 완료되었습니다")).toBeVisible();
-    expect(screen.getByText("도구 입력 오류")).toBeVisible();
+    expect(within(screen.getByRole("complementary", { name: "작업 노트" })).getByText("도구 오류")).toBeVisible();
     expect(stream.close).toHaveBeenCalled();
   });
   it("shows safe MCP input summaries in tool history and event details", async () => {
@@ -239,7 +250,7 @@ describe("workbench", () => {
     expect(
       screen.getByRole("option", { name: "실제 모델 · 연결 미설정" }),
     ).toBeDisabled();
-    expect(screen.getByText("테스트 모드 / 실제 모델 호출 없음")).toBeVisible();
+    expect(screen.getByText("테스트 모드 · 오프라인 고정 자료 / 실제 모델·웹 호출 없음")).toBeVisible();
     expect(screen.getByText("2024-12-31")).toBeVisible();
   });
   it("sends explicit API controls and only updates stages from events", async () => {
@@ -318,6 +329,7 @@ describe("workbench", () => {
       "href",
       "https://example.org/report",
     );
+    fireEvent.click(screen.getByRole("button", { name: "보고서 보기" }));
     fireEvent.click(screen.getByText("이전 보고서와 비교"));
     expect(screen.getByText("이전 요약")).toBeVisible();
     expect(screen.getByText("추가 근거 1건")).toBeVisible();
@@ -433,5 +445,148 @@ describe("workbench", () => {
     expect(
       screen.queryByRole("link", { name: /원문 보기/ }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("service dashboard", () => {
+  it('shows Exa configuration separately from offline test execution and unknown dataset date', async () => {
+    vi.mocked(fetch).mockResolvedValue({ok:true,json:async()=>({...config,configured:true,capabilities:{general_web:true,search_provider:'exa'},dataset:{name:'일반 공개 웹',as_of:null}})} as Response);
+    render(<App />);
+    expect(await screen.findByText('일반 웹 검색 · Exa 설정됨 (연결·잔액 미검증)')).toBeVisible();
+    expect(screen.getByText('테스트 모드 · 오프라인 고정 자료 / 실제 모델·웹 호출 없음')).toBeVisible();
+    expect(screen.getByText('미확인')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('실행 모드'),{target:{value:'live'}});
+    expect(screen.getByText('실제 모델 모드 · 일반 웹 검색 사용 (Exa)')).toBeVisible();
+  });
+  it('keeps observed web tool labels separate from configured availability', async () => {
+    const stream = await start();
+    expect(screen.getByText('일반 웹 검색 · 미설정')).toBeVisible();
+    act(()=>stream.onmessage?.({data:JSON.stringify({run_id:'run-1',seq:2,type:'tool_start',timestamp:'2026-01-01T00:00:02Z',data:{tool:'web_search',snapshot:snapshot({last_seq:2})}})}));
+    expect(screen.getByText('일반 웹 검색 · 미설정')).toBeVisible();
+    expect(screen.queryByText('실제 모델 모드 · 일반 웹 검색 사용 (Exa)')).not.toBeInTheDocument();
+  });
+  it('does not infer general web availability from live model configuration', async () => {
+    vi.mocked(fetch).mockResolvedValue({ok:true,json:async()=>({...config,configured:true,test_mode_available:false,capabilities:{general_web:false,search_provider:null}})} as Response);
+    render(<App />);
+    expect(await screen.findByText('실제 모델 모드 · 제한된 자료 범위 / 일반 웹 검색 없음')).toBeVisible();
+    expect(screen.getByText('일반 웹 검색 · 미설정')).toBeVisible();
+  });
+  it('keeps granular validation and repair progress active until authoritative terminal state', async () => {
+    const stream = await start();
+    const progress = [
+      ['discovery_start',{purpose:'planner_context'}],
+      ['discovery_complete',{purpose:'planner_context',tool_count:4}],
+      ['model_start',{role:'Reporter',attempt:1,model_call_id:'a'}],
+      ['model_complete',{role:'Reporter',attempt:1,model_call_id:'a'}],
+      ['validation_error',{role:'Reporter',attempt:1,scope:'output_schema'}],
+      ['repair_start',{role:'Reporter',attempt:2}],
+      ['model_start',{role:'Reporter',attempt:2,model_call_id:'b'}],
+      ['model_complete',{role:'Reporter',attempt:2,model_call_id:'b'}],
+      ['validation_complete',{role:'Reporter',attempt:2,scope:'output_schema'}],
+      ['validation_complete',{role:'Reporter',scope:'citations'}],
+    ] as const;
+    for (const [index,[type,data]] of progress.entries()) {
+      const seq = index + 2;
+      act(() => stream.onmessage?.({data:JSON.stringify({run_id:'run-1',seq,type,timestamp:'2026-01-01T00:00:02Z',data:{...data,snapshot:snapshot({last_seq:seq,stage:'Reporter'})}})}));
+      expect(stream.close).not.toHaveBeenCalled();
+      expect(screen.getByRole('button',{name:'실행 중단'})).toBeEnabled();
+    }
+    act(() => stream.emit(snapshot({last_seq:12,stage:'Evaluator',status:'success'}),'evaluation'));
+    expect(stream.close).not.toHaveBeenCalled();
+    act(() => stream.emit(snapshot({last_seq:13,stage:'Evaluator',status:'success'}),'branch'));
+    expect(stream.close).not.toHaveBeenCalled();
+    act(() => stream.emit(snapshot({last_seq:14,stage:'Evaluator',status:'success',finished_at:'2026-01-01T00:00:12Z'}),'terminal'));
+    expect(stream.close).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('조사가 완료되었습니다')).toBeVisible();
+    expect(screen.getByText('출력 검증 오류 · 출력 스키마 · Reporter · 시도 1')).toBeVisible();
+    expect(screen.getByText('출력 검증 완료 · 인용 · Reporter')).toBeVisible();
+  });
+  it.each([null, undefined, 'unknown', ''])('safely displays nullable or unknown evidence dates (%s)', async (date) => {
+    const stream = await start();
+    act(() => stream.onmessage?.({data: JSON.stringify({run_id:'run-1',seq:2,type:'node_complete',timestamp:'2026-01-01T00:00:02Z',data:{snapshot:snapshot({last_seq:2,evidence:[{
+      id:'web:page',document_id:'web',section_id:'page',title:'웹 원문',url:'https://example.org/page',excerpt:'실제 수집 구간',
+      ...{published_at:date,as_of:date,provenance:'exa_contents'},
+    }]})}})}));
+    fireEvent.click(screen.getByRole('button',{name:'수집 자료 보기'}));
+    fireEvent.click(screen.getByRole('button',{name:/web:page/}));
+    expect(screen.getByText('게시일 미확인')).toBeVisible();
+    expect(screen.getByText('자료 기준일 미확인')).toBeVisible();
+    expect(screen.getByText('수집 경로: exa_contents')).toBeVisible();
+    expect(screen.getByText('실제 수집 구간')).toBeVisible();
+    expect(screen.getByRole('link',{name:/원문 보기/})).toHaveAttribute('href','https://example.org/page');
+    expect(screen.queryByText(/Invalid Date|undefined|null/)).not.toBeInTheDocument();
+  });
+  it('renders generic provenance as plain text without assuming a provider', async () => {
+    const stream = await start();
+    act(() => stream.onmessage?.({data:JSON.stringify({run_id:'run-1',seq:2,type:'node_complete',timestamp:'2026-01-01T00:00:02Z',data:{snapshot:snapshot({last_seq:2,evidence:[{
+      id:'e1',document_id:'d',section_id:'s',title:'새 출처',url:'https://example.org',excerpt:'근거',published_at:'2026-01-01',as_of:'2026-01-02',
+      ...{provenance:'<b>future_provider</b>'},
+    }]})}})}));
+    fireEvent.click(screen.getByRole('button',{name:'수집 자료 보기'}));
+    fireEvent.click(screen.getByRole('button',{name:/e1 새 출처/}));
+    expect(screen.getByText('수집 경로: <b>future_provider</b>')).toBeVisible();
+    expect(screen.getByText('게시일 2026-01-01')).toBeVisible();
+    expect(screen.getByText('자료 기준일 2026-01-02')).toBeVisible();
+    expect(screen.queryByText('수집 경로: exa_contents')).not.toBeInTheDocument();
+  });
+  it("returns keyboard focus to the source when reopening the same citation", async () => {
+    const stream = await start();
+    act(() => stream.emit(snapshot({last_seq:2,report:{title:'보고서',summary:'요약',claims:[{text:'주장',citation_ids:['e1']}],limitations:[]},evidence:[{id:'e1',title:'출처',document_id:'d',section_id:'s',url:'https://example.org',published_at:'2026-01-01',as_of:'2026-01-01',excerpt:'근거 원문'}]})));
+    fireEvent.click(screen.getByRole('button',{name:'출처 e1 보기'}));
+    expect(screen.getByLabelText('선택한 출처')).toHaveFocus();
+    fireEvent.click(screen.getByRole('button',{name:'보고서 보기'}));
+    const citation=screen.getByRole('button',{name:'출처 e1 보기'});
+    citation.focus();
+    fireEvent.click(citation);
+    expect(screen.getByLabelText('선택한 출처')).toHaveFocus();
+  });
+  it("shows restored unavailable sources separately from citation evidence", async () => {
+    const stream = await start();
+    act(() => stream.emit(Object.assign(snapshot({last_seq:2,stage:'Researcher'}), {
+      unavailable_sources:[{document_id:'optional-report',section_id:'revenue',retrieval_status:'unavailable',reason:'public_source_unavailable'}]
+    })));
+    fireEvent.click(screen.getByRole('button',{name:'수집 자료 보기'}));
+    expect(screen.getByText('이용 불가 자료 · 인용 제외')).toBeVisible();
+    expect(screen.getByText('optional-report / revenue')).toBeVisible();
+    expect(screen.getByRole('button',{name:'수집 자료 보기'})).toHaveTextContent('0');
+    expect(screen.getByText('실행 ID: run-1')).toBeVisible();
+    expect(screen.getByRole('button',{name:'실행 중단'})).toBeEnabled();
+  });
+  it("offers persistent report, source and revision views with an observable timeline", async () => {
+    const stream = await start();
+    expect(screen.getByRole('heading', {name:'리서치 워크스페이스'})).toBeVisible();
+    expect(screen.getByRole('region', {name:'작업 타임라인'})).toBeVisible();
+    expect(screen.getByRole('button', {name:'보고서 보기'})).toHaveAttribute('aria-pressed','true');
+    fireEvent.click(screen.getByRole('button', {name:'수집 자료 보기'}));
+    expect(screen.getByRole('button', {name:'수집 자료 보기'})).toHaveAttribute('aria-pressed','true');
+    expect(screen.getByText(/검색 결과는 인용 근거가 아닙니다/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', {name:'수정 기록 보기'}));
+    expect(screen.getByText('아직 완료된 검토 기록이 없습니다.')).toBeVisible();
+    act(() => stream.emit(snapshot({last_seq:2,stage:'Researcher'}),'model_start'));
+    expect(screen.getByText('모델 요청 시작')).toBeVisible();
+    expect(screen.getByText(/본문 토큰 스트림을 제공하지 않습니다/)).toBeVisible();
+    expect(screen.getByText(/현재 관측된 도구/)).toBeVisible();
+    expect(screen.queryByText('web_search')).not.toBeInTheDocument();
+  });
+  it("does not mark a terminal lane active and pauses motion during reconnect", async () => {
+    const stream = await start();
+    expect(document.querySelector('.stages [aria-current="step"]')).not.toBeNull();
+    act(() => stream.onerror?.());
+    expect(screen.getByText(/연결 복구 중/)).toBeVisible();
+    expect(document.querySelector('.dashboard')).toHaveAttribute('data-motion','paused');
+    act(() => stream.emit(snapshot({last_seq:3,status:'error',stage:'Researcher',finished_at:new Date().toISOString()}),'terminal'));
+    expect(document.querySelector('.stages [aria-current="step"]')).toBeNull();
+    expect(screen.queryByText('조사가 완료되었습니다')).not.toBeInTheDocument();
+  });
+  it("atomically shows a new unreviewed report instead of pinning the previous revision", async () => {
+    const stream=await start();
+    const oldReport={title:'이전 버전',summary:'이전 요약',claims:[],limitations:[]};
+    const revisions=[{iteration:1,report:oldReport,evaluation:{decision:'revise' as const,issues:['추가 근거 필요'],follow_up:[]},evidence_ids:[],added_evidence_ids:[]}];
+    act(()=>stream.emit(snapshot({last_seq:2,iteration:2,stage:'Reporter',revisions,report:oldReport}),'node_start'));
+    expect(screen.getByText('이전 요약')).toBeVisible();
+    act(()=>stream.emit(snapshot({last_seq:3,iteration:2,stage:'Reporter',revisions,report:{...oldReport,title:'새 버전',summary:'새 요약'}})));
+    expect(screen.getByText('새 요약')).toBeVisible();
+    expect(screen.getByText('평가 전 초안')).toBeVisible();
+    expect(screen.queryByText('조사가 완료되었습니다')).not.toBeInTheDocument();
   });
 });

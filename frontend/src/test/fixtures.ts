@@ -2,6 +2,7 @@ import type { Snapshot, Config } from "../types";
 export const config: Config = {
   configured: false,
   test_mode_available: true,
+  capabilities: { general_web: false, search_provider: null },
   dataset: { name: "공개 기업 자료", as_of: "2024-12-31" },
   limits: { max_iterations: 2 },
 };

@@ -45,7 +45,9 @@ class Evaluation(Strict):
 
 ROLE_SCHEMAS = {"Listener": Interpretation, "Planner": Plan, "Researcher": ResearchResult, "Reporter": Report, "Evaluator": Evaluation}
 
-def validate_citations(report, evidence):
+def validate_citations(report, evidence, *, validator=None):
+    if validator is not None and any(not validator(e) for e in evidence):
+        raise ValueError("Unregistered citation evidence")
     ids = {e["id"] for e in evidence}
     if any(not set(c["citation_ids"]).issubset(ids) for c in report["claims"]):
         raise ValueError("Unknown citation ID")
