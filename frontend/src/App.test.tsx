@@ -53,6 +53,50 @@ async function start() {
   return Stream.instances[0];
 }
 describe("workbench", () => {
+  it("shows recoverable tool input errors without completing the lookup or run", async () => {
+    const stream = await start();
+    const reason = "도구 입력을 확인하고 다시 조회해 주세요.";
+    const running = snapshot({ status: "running", stage: "Researcher", last_seq: 2 });
+    act(() => stream.onmessage?.({ data: JSON.stringify({
+      run_id: running.run_id, seq: 2, type: "tool_error", timestamp: new Date().toISOString(),
+      data: { snapshot: running, tool: "get_document", reason,
+        arguments: { document_id: "private invalid ID" }, error: "private traceback" },
+    }) }));
+    expect(screen.getByText("도구 입력 오류")).toBeVisible();
+    expect(screen.getByText("⚠")).toBeVisible();
+    expect(screen.getByText(reason)).toBeVisible();
+    expect(screen.queryByText(/조회 완료|결과 0건/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("근거 수집 중")).toBeVisible();
+    expect(screen.getByRole("button", { name: "실행 중단" })).toBeEnabled();
+    expect(stream.close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("개발 상세"));
+    expect(screen.getByText(`도구 입력 오류 · get_document · ${reason}`)).toBeVisible();
+    expect(screen.queryByText(/private invalid ID|private traceback/)).not.toBeInTheDocument();
+
+    // An actual successful empty lookup remains distinct from the input error.
+    act(() => stream.onmessage?.({ data: JSON.stringify({
+      run_id: running.run_id, seq: 3, type: "tool_complete", timestamp: new Date().toISOString(),
+      data: { snapshot: { ...running, last_seq: 3 }, tool: "search", count: 0 },
+    }) }));
+    expect(screen.getByText("조회 완료 · 0건")).toBeVisible();
+    expect(screen.getByText("도구 입력 오류")).toBeVisible();
+    expect(stream.close).not.toHaveBeenCalled();
+    act(() => stream.onmessage?.({ data: JSON.stringify({
+      run_id: running.run_id, seq: 4, type: "tool_complete", timestamp: new Date().toISOString(),
+      data: { snapshot: { ...running, last_seq: 4 }, tool: "get_document", count: 1 },
+    }) }));
+    expect(screen.getByText("조회 완료 · 1건")).toBeVisible();
+    const report = { title: "재조회 후 보고서", summary: "수정된 결과", claims: [], limitations: [] };
+    act(() => stream.emit(snapshot({ last_seq: 5, stage: "Reporter", report })));
+    expect(screen.getByText("수정된 결과")).toBeVisible();
+    expect(stream.close).not.toHaveBeenCalled();
+    act(() => stream.emit(snapshot({ last_seq: 6, status: "success", report,
+      finished_at: new Date().toISOString() }), "terminal"));
+    expect(screen.getByText("조사가 완료되었습니다")).toBeVisible();
+    expect(screen.getByText("도구 입력 오류")).toBeVisible();
+    expect(stream.close).toHaveBeenCalled();
+  });
   it("shows safe MCP input summaries in tool history and event details", async () => {
     const stream = await start();
     act(() => stream.onmessage?.({ data: JSON.stringify({

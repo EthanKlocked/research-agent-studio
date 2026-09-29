@@ -21,13 +21,15 @@ npm run build
 
 SSE uses ordinary `message` events from `/api/runs/{id}/events?after={last_seq}`. The envelope is `{seq, run_id, type, timestamp, data: {snapshot, ...safe_metadata}}`. Only newer same-run snapshots are applied. On disconnect the EventSource is closed; recovery reads the server snapshot before opening a new stream after its last sequence. Only a non-null `finished_at` or an explicit terminal event (using its server timestamp if needed) closes the stream; evaluator success/limit/empty statuses alone remain active. Unmount also closes streams. Server-restart 404s clear the stale run reference and enable a new run.
 
+Recoverable `tool_error` events are displayed as tool input errors with a safe summary, not a completed empty lookup or a terminal run failure. Subsequent snapshots and the final terminal event remain authoritative. Tests exercise error → successful empty lookup → successful retrieval → updated report → completion without rendering raw arguments or exception details.
+
 Only the run ID is optionally saved in sessionStorage (`research-studio.run-id`). Run content is never persisted in browser storage. The server remains authoritative; a saved ID does not promise durable recovery.
 
 Fixtures exist **only in test files**. Test-mode progress and results always arrive from the backend, not timers or bundled fallback data. The only interval displays elapsed wall time.
 
 ## Coverage and verification
 
-27 Vitest / Testing Library tests cover monotonic sequencing, deduplication, cross-run isolation, safe links, configuration/mode gating, explicit create payload, event-driven stage updates, citations/source focus, revision comparison, cancellation, empty/error/limit distinction, snapshot-first reconnection, 404 recovery, run-ID restoration and stream cleanup. Regressions cover unfinished evaluator statuses, final branch/terminal retention, stable elapsed time, live-mode `scenario: "pass"`, revision selection, and safe MCP `input_summary` display without raw inputs.
+28 Vitest / Testing Library tests cover monotonic sequencing, deduplication, cross-run isolation, safe links, configuration/mode gating, explicit create payload, event-driven stage updates, citations/source focus, revision comparison, cancellation, empty/error/limit distinction, snapshot-first reconnection, 404 recovery, run-ID restoration and stream cleanup. Regressions cover unfinished evaluator statuses, final branch/terminal retention, stable elapsed time, live-mode `scenario: "pass"`, revision selection, and safe MCP `input_summary` display without raw inputs.
 
 Verified on macOS: clean `npm ci`, all tests, standalone TypeScript check, production build, and `npm audit` with zero vulnerabilities. Lockfile resolves React 19.1.0, Vite 6.4.3 and Vitest 4.1.11.
 

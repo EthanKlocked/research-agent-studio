@@ -12,7 +12,7 @@ FastAPI serves the built React client and JSON/SSE endpoints on one loopback ori
 
 ## State and validation
 
-Per-run shared state includes request interpretation, plan, deduplicated evidence, report revisions, evaluation, feedback, iteration, errors and lifecycle fields. Each role gets a fresh inner message history; validated public JSON outputs map back into shared state. Prior evidence and evaluation feedback survive replanning. Citation IDs must refer to retrieved evidence; existence is not proof of semantic truth.
+Per-run shared state includes request interpretation, plan, deduplicated evidence, report revisions, evaluation, feedback, iteration, errors and lifecycle fields. Each role gets a fresh inner message history; validated public JSON outputs map back into shared state. Plain JSON objects and one enclosing JSON/unlabelled code fence are accepted; prose extraction, automatic repair and content-block lists are not. Provider-native structured output is not forced across unknown compatible servers. Prior evidence and evaluation feedback survive replanning. Citation IDs must refer to retrieved evidence; existence is not proof of semantic truth.
 
 Evaluator outcomes can appear before workflow cleanup. A final lifecycle snapshot with `finished_at`, or an explicit terminal event, determines completed UI state. Cancellation records intent before signalling the actual task and publishes one terminal event after cleanup. Provider-side immediate cancellation is not guaranteed.
 
@@ -24,7 +24,7 @@ Evaluator outcomes can appear before workflow cleanup. A final lifecycle snapsho
 - `GET /api/runs/{run_id}/events?after=N`: ordered normal SSE messages with sequence, run ID, timestamp, event type and full safe snapshot.
 - `POST /api/runs/{run_id}/cancel`: actual task cancellation.
 
-Node start/completion, tool start/completion, evaluation, branch and terminal events drive the client. Tool summaries expose bounded search lengths/result limits and allowlisted section IDs, not arbitrary raw arguments. The UI shows explicit plans and evaluation reasons, never hidden reasoning or raw provider prompts/configuration.
+Node start/completion, tool start/completion/input-error, evaluation, branch and terminal events drive the client. Locally validated input/section-ID errors return a fixed structured ToolMessage through LangChain middleware. Every attempt shares the call budget; at most two errors permit correction. A subsequent successful section retrieval clears unresolved error state. Search alone does not. Forbidden tools, exhausted budgets and remote/protocol failures remain fatal. MCP calls are serialized within a research node so an older concurrent retrieval cannot clear a newer input failure. Tool summaries expose bounded search lengths/result limits and allowlisted section IDs, not arbitrary raw arguments. The UI shows explicit plans and evaluation reasons, never hidden reasoning or raw provider prompts/configuration.
 
 The client deduplicates events, isolates runs, and reads a snapshot before reconnecting. It keeps only the run ID in sessionStorage. Memory retention is bounded; restart loses runs. Use one server worker.
 

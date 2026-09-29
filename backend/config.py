@@ -21,6 +21,9 @@ class Settings:
     max_concurrent: int = 2
     max_runs: int = 20
     max_events: int = 160
+    max_tool_calls: int = 12
+    max_tool_corrections: int = 2
+    mcp_timeout: float = 10
     model_timeout: float = 30
     run_timeout: float = 120
 

@@ -1,19 +1,17 @@
 """Real LangGraph outer workflow. Each node returns validated partial state."""
 from copy import deepcopy
 import json
-from pathlib import Path
-from typing import TypedDict, Any
+from typing import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langchain_core.tools import tool
-from langsmith import tracing_context
+from langchain.agents.middleware import wrap_tool_call
+from langchain_core.messages import ToolMessage
 from backend.agents import RoleRunner
-from backend.mcp_client import document_session, ToolFailure
-from backend.schemas import ROLE_SCHEMAS, validate_citations
-
-SECTION_IDS = frozenset(
-    (s["document_id"], s["section_id"])
-    for s in json.loads((Path(__file__).resolve().parents[1] / "data/apple_fy2024.json").read_text())["sections"]
+from backend.mcp_client import (
+    document_session, ToolFailure, RecoverableToolError,
+    SearchArguments, SectionArguments, SECTION_IDS,
 )
+from backend.schemas import ROLE_SCHEMAS, validate_citations
 
 
 def tool_input_summary(name, arguments):
@@ -56,11 +54,15 @@ def build_graph(settings, mode, scenario, publish):
     async def research(state):
         evidence = {e["id"]: e for e in state["evidence"]}
         failures = []
-        async with document_session() as client:
+        async with document_session(timeout=settings.mcp_timeout, max_tool_calls=settings.max_tool_calls, max_tool_corrections=settings.max_tool_corrections) as client:
             async def invoke_tool(name, args):
-                await publish("tool_start", state, {"tool":name, "input_summary":tool_input_summary(name, args)})
+                public_name = name if name in ("search_documents", "get_section") else "unknown"
+                await publish("tool_start", state, {"tool":public_name, "input_summary":tool_input_summary(name, args)})
                 try:
                     result = await client.call(name, args)
+                except RecoverableToolError:
+                    await publish("tool_error", state, {"tool":name, "reason":"입력 오류로 재조회가 필요합니다."})
+                    return {"error":{"code":"invalid_tool_input", "message":"Check tool arguments and search for valid document/section IDs before retrieving again."}}
                 except Exception as exc:
                     failures.append(exc)
                     raise
@@ -68,16 +70,24 @@ def build_graph(settings, mode, scenario, publish):
                     evidence[result["id"]] = result
                 await publish("tool_complete", state, {"tool":name, "count":len(result) if isinstance(result, list) else 1})
                 return result
-            @tool
+            @tool(args_schema=SearchArguments)
             async def search_documents(query: str, limit: int = 5) -> list[dict]:
                 """Search the bundled historical summaries by keyword; query <=300 chars, limit 1..5."""
                 return await invoke_tool("search_documents", {"query":query, "limit":limit})
-            @tool
+            @tool(args_schema=SectionArguments)
             async def get_section(document_id: str, section_id: str) -> dict:
                 """Read one allowlisted document section, using IDs from search results."""
                 return await invoke_tool("get_section", {"document_id":document_id, "section_id":section_id})
-            output = await runner.invoke("Researcher", state, [search_documents, get_section])
-            if failures:
+            @wrap_tool_call
+            async def document_tools(request, handler):
+                # Route before LangChain coercion/default error handling: every raw
+                # attempt reaches the bounded local validator, including unknown tools.
+                call = request.tool_call
+                result = await invoke_tool(call["name"], call["args"])
+                return ToolMessage(content=json.dumps(result, ensure_ascii=False), tool_call_id=call["id"], name=call["name"], status="error" if isinstance(result, dict) and "error" in result else "success")
+
+            output = await runner.invoke("Researcher", state, [search_documents, get_section], middleware=[document_tools])
+            if failures or client.unresolved_error:
                 raise ToolFailure("Document tool failed")
             if client.calls == 0:
                 raise ToolFailure("Researcher did not call a document tool")
