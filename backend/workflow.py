@@ -137,7 +137,7 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
             output = await runner.invoke("Researcher", state, tools, middleware=[document_tools])
             if failures or client.unresolved_error:
                 raise ToolFailure("Document tool failed")
-            if client.calls == 0:
+            if client.calls == 0 and not (state["iteration"] > 1 and state["evidence"]):
                 raise ToolFailure("Researcher did not call a document tool")
             if unavailable and not evidence:
                 raise ToolFailure("Optional sources unavailable and no evidence retrieved")
@@ -155,13 +155,23 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
             await publish("node_start", current, {})
             if role == "Planner" and runner.tool_inventory is None:
                 await planner_inventory(current)
+            if role == "Planner" and persistent_client is not None:
+                runner.web_budget = await persistent_client.remaining_web_budget()
             if role == "Researcher":
                 updates = await research(current)
             else:
                 raw = await runner.invoke(role, current, [])
                 value = ROLE_SCHEMAS[role].model_validate(raw).model_dump()
-                if role == "Reporter":
-                    validation = {"role": role, "scope": "citations"}
+                if role == "Listener":
+                    scope = value.pop("scope")
+                    updates = value
+                    # Only an explicit, schema-validated decision can end research
+                    # for a closed corpus. Never infer scope from retrieval/errors.
+                    if scope == "out_of_scope" and not (mode == "live" and settings.general_web_enabled):
+                        updates["status"] = "out_of_scope"
+                elif role == "Reporter":
+                    # Final source-registry check is independent of model citation repair.
+                    validation = {"role": role, "scope": "evidence_integrity"}
                     await publish("validation_start", current, validation)
                     try:
                         validate_citations(value, current["evidence"], validator=persistent_client.validate_evidence if persistent_client is not None else None)
@@ -204,7 +214,7 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
     for role in ("Listener", "Planner", "Researcher", "Reporter", "Evaluator"):
         builder.add_node(role, node(role))
     builder.add_edge(START, "Listener")
-    builder.add_edge("Listener", "Planner")
+    builder.add_conditional_edges("Listener", lambda s: END if s["status"] == "out_of_scope" else "Planner")
     builder.add_edge("Planner", "Researcher")
     builder.add_conditional_edges("Researcher", lambda s: END if s["status"] == "empty" else "Reporter")
     builder.add_edge("Reporter", "Evaluator")

@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import ValidationError
 from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp_server.tool_schemas import SearchArguments, SectionArguments, PageArguments, ARGUMENT_SCHEMAS
-from mcp_server.general_web import _public_url, _date, MAX_TEXT_CHARS, MAX_RESPONSE_BYTES
+from mcp_server.general_web import _public_url, _date, MAX_TEXT_CHARS, MAX_RESPONSE_BYTES, WEB_FAILURE_CATEGORIES
 from mcp_server.dataset import DATA, SECTION_IDS, get_dataset_scope
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -72,6 +72,12 @@ def document_environment(*, enabled=None, search_provider="", exa_api_key=""):
 class ToolFailure(Exception):
     pass
 
+class WebToolFailure(ToolFailure):
+    def __init__(self, category):
+        self.web_category = category if type(category) is str and category in WEB_FAILURE_CATEGORIES else "unavailable"
+        super().__init__("General web retrieval failed")
+
+
 class RecoverableToolError(ToolFailure):
     """Only locally verified argument/identifier mistakes, never remote errors."""
 
@@ -95,6 +101,24 @@ class DocumentClient:
         # Per-researcher attempt budgets; retain source identities across revisions.
         self.calls = self.corrections = 0
         self.unresolved_error = False
+
+    async def remaining_web_budget(self):
+        """Read run-local MCP counters, not per-role counters or guessed caps."""
+        exhausted = {"search": 0, "read": 0, "status": "unavailable"}
+        try:
+            result = await asyncio.wait_for(self.session.read_resource("research://run/web-budget"), self.timeout)
+            if len(result.contents) != 1 or len(result.contents[0].text) > 512:
+                return exhausted
+            value = json.loads(result.contents[0].text)
+            if (type(value) is not dict or set(value) != {"search", "read", "status"}
+                    or type(value["search"]) is not int or not 0 <= value["search"] <= 6
+                    or type(value["read"]) is not int or not 0 <= value["read"] <= 8
+                    or value["status"] not in ("available", "quota", "auth", "unavailable")
+                    or (value["status"] != "available" and (value["search"] or value["read"]))):
+                return exhausted
+            return value
+        except Exception:
+            return exhausted
 
     def validate_evidence(self, value):
         return isinstance(value, dict) and self._evidence.get(value.get("id")) == value
@@ -172,6 +196,11 @@ class DocumentClient:
         try:
             result = await asyncio.wait_for(self.session.call_tool(name, args), self.timeout)
             if result.isError:
+                structured = result.structuredContent
+                if name in ("web_search", "read_page") and type(structured) is dict and set(structured) == {"web_failure"}:
+                    failure = structured["web_failure"]
+                    if type(failure) is dict and set(failure) == {"category"}:
+                        raise WebToolFailure(failure["category"])
                 raise ToolFailure("Document tool failed")
             if result.structuredContent is not None:
                 value = result.structuredContent
@@ -192,14 +221,15 @@ class DocumentClient:
                 self.unresolved_error = False
                 self._evidence[value["id"]] = deepcopy(value)
             return value
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, WebToolFailure):
             raise
         except Exception as exc:
             raise ToolFailure("Document tool failed") from exc
 
 @asynccontextmanager
 async def document_session(timeout=10, max_tool_calls=12, max_tool_corrections=2, *, enabled=None, search_provider="", exa_api_key=""):
-    # No model credentials, global config, or traces are forwarded to the child.
+    # No model credentials, inherited global config, or traces are forwarded.
+    # Only explicit Exa opt-in forwards EXA_API_KEY to this dedicated MCP child.
     env = document_environment(enabled=enabled, search_provider=search_provider, exa_api_key=exa_api_key)
     params = StdioServerParameters(command=sys.executable, args=["-m", "mcp_server.server"], cwd=str(ROOT), env=env)
     with open(os.devnull, "w", encoding="utf-8") as errlog:

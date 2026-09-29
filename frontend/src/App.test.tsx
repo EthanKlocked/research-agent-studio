@@ -54,6 +54,37 @@ async function start() {
   return Stream.instances[0];
 }
 describe("workbench", () => {
+  it.each(["stream", "restore", "reconnect"])("shows out-of-scope separately from errors via %s", async (delivery) => {
+    const final = snapshot({ status: "out_of_scope", stage: "Listener", iteration: 0,
+      last_seq: 8, finished_at: "2026-01-01T00:00:12Z", errors: [],
+      interpreted_request: "현재 역사적 기업 자료로 날씨를 답할 수 없습니다." });
+    if (delivery === "restore") {
+      sessionStorage.setItem("research-studio.run-id", "run-1");
+      vi.mocked(fetch).mockImplementation(async (url) => ({ ok: true,
+        json: async () => url === "/api/config" ? config : final,
+      } as Response));
+      render(<App />);
+    } else {
+      const stream = await start();
+      if (delivery === "stream") {
+        act(() => stream.emit({ ...final, finished_at: null }, "node_complete"));
+        expect(stream.close).not.toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "실행 중단" })).toBeEnabled();
+        act(() => stream.emit({ ...final, last_seq: 9 }, "terminal"));
+      } else {
+        vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => final } as Response);
+        act(() => stream.onerror?.());
+      }
+    }
+    expect(await screen.findByText("현재 자료 범위를 벗어난 질문입니다", {}, { timeout: 3500 })).toBeVisible();
+    expect(screen.getByText("허용된 자료로 답할 수 있는 질문으로 바꿔 주세요")).toBeVisible();
+    expect(screen.getByText("일반 웹 검색이 꺼져 있어 현재 제공된 자료만 조사할 수 있습니다. 도구 오류나 검색 결과 없음과는 다릅니다.")).toBeVisible();
+    expect(screen.queryByText("조사 중 오류가 발생했습니다")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "리서치 시작" })).toBeEnabled());
+    expect(Stream.instances.length).toBe(delivery === "restore" ? 0 : 1);
+    if (delivery !== "restore") expect(Stream.instances[0].close).toHaveBeenCalled();
+  });
   it("directs developer details readers to the visible event timeline", async () => {
     await start();
     fireEvent.click(screen.getByText("개발 상세"));
@@ -94,6 +125,8 @@ describe("workbench", () => {
     expect(screen.getByText("추가 조사 요청 시간이 초과되었습니다.")).toBeVisible();
     expect(screen.getByText("위험 근거 부족")).toBeVisible();
     expect(screen.queryByText("조사가 완료되었습니다")).not.toBeInTheDocument();
+    // Wait for restoration and its form/source-reset effect before selecting evidence.
+    await waitFor(() => expect(screen.getByRole("button", { name: "리서치 시작" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "출처 e1 보기" }));
     expect(screen.getByText("이전 근거 원문")).toBeVisible();
   });

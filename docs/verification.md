@@ -1,5 +1,17 @@
 # Verification scope
 
+## Citation repair and remaining web allowances
+
+`PYTHON_DOTENV_DISABLED=1 bash scripts/test.sh` passes **378 Python tests and 59 frontend tests**, including TypeScript and production build. Reporter receives only the exact citation `id`, not competing retrieval identifiers. Citation failures are `validation`; correction shares the existing single schema/citation repair allowance and does not perform extra retrieval. Wrong document IDs and forged citations are rejected rather than silently accepted.
+
+Mock-provider and real local MCP tests cover seven shortened citations corrected to exact evidence IDs, structured allowlisted web failure categories, sanitized `web_category` logging, and authoritative remaining per-run search/read allowances supplied to Planner. Revision runs may reuse previously admitted evidence. Missing or malformed budget resources fail closed to zero remaining allowance. These checks do not establish why an earlier live second-iteration lookup failed, or prove live citation accuracy. No live server access, Exa calls, credential inspection or current Windows execution was performed.
+
+## Scope outcome and portable path regression checks
+
+After the scope fix, `bash scripts/test.sh` on macOS passes **345 Python tests and 59 frontend tests**, including TypeScript and production build. Listener provides a validated scope classification: explicit `out_of_scope` with general web disabled ends before retrieval, with a distinct outcome rather than a tool error. Partial/unknown or omitted legacy classifications continue; web-enabled live runs do not reject based on closed-corpus scope. Empty results and real tool failures retain their existing behavior. Scope classification is model-authored: these offline protocol tests do not prove live classification accuracy, and an unknown or incorrect classification can still enter ordinary retrieval.
+
+Frontend tests cover provisional versus terminal scope snapshots, stream closure, restoration and reconnect. Both parser-path assertions now compare `Path` values, with Windows-style path semantics covered separately; this is not direct Windows execution. The MCP session comment documents the narrowly scoped Exa credential forwarding. No live provider calls or new browser smoke were used for these checks.
+
 ## General web and dashboard verification
 
 Frontend capability-contract TDD: three new regressions first failed on missing capability/offline labels, then passed. The final frontend suite passes **56 tests across 4 files**; `npm --prefix frontend run typecheck` and `npm --prefix frontend run build` also pass on macOS. Checks cover Exa configured versus actual offline test execution, live-model configuration without general web, observed web tool labels not implying availability, and nullable dataset dates. Existing dashboard coverage includes granular model/validation/repair progress, terminal lifecycle, evidence dates/provenance, reconnect and retained reports.

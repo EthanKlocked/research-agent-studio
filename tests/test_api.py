@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
@@ -112,9 +113,9 @@ def test_blank_pdf_parser_override_defaults_in_parent_and_server(monkeypatch, va
         lookups.append(name)
         return "/usr/bin/pdftotext" if name == "pdftotext" else None
     monkeypatch.setattr(mcp_client.shutil, "which", which)
-    assert mcp_client.document_environment()["RESEARCH_PDFTOTEXT"] == "/usr/bin/pdftotext"
+    assert Path(mcp_client.document_environment()["RESEARCH_PDFTOTEXT"]) == Path("/usr/bin/pdftotext").resolve()
     async def decode(body, executable):
-        assert executable == "/usr/bin/pdftotext"
+        assert Path(executable) == Path("/usr/bin/pdftotext").resolve()
         return OPERATIONS
     monkeypatch.setattr(public_sources, "_pdf_text", decode)
     store = public_sources.PublicSourceStore(enabled=True, transport=httpx.MockTransport(
@@ -149,6 +150,28 @@ def test_failed_revision_api_and_sse_preserve_exact_partial_contract(monkeypatch
         assert final["report"]["claims"] and final["evidence"]
         assert len(final["errors"]) == 1 and "Planner/timeout" in final["errors"][0]
         assert "private provider details" not in response.text
+
+
+def test_out_of_scope_api_replay_and_snapshot_are_final_without_tool_error(monkeypatch):
+    from backend.agents import RoleRunner
+    async def invoke(self, role, state, tools, middleware=()):
+        assert role == "Listener"
+        return {"interpreted_request": "허용된 자료 밖의 질문", "scope": "out_of_scope"}
+    monkeypatch.setattr(RoleRunner, "invoke", invoke)
+    with TestClient(make_app()) as client:
+        initial = client.post("/api/runs", json={"question": "오늘 날씨", "mode": "test"}).json()
+        rid = initial["run_id"]
+        response = client.get(f"/api/runs/{rid}/events")
+        events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+        final = client.get(f"/api/runs/{rid}").json()
+        assert final["status"] == "out_of_scope" and final["finished_at"]
+        assert final["errors"] == [] and final["report"] is None
+        assert [e["type"] for e in events] == ["node_start", "node_complete", "terminal"]
+        assert not events[-2]["data"]["snapshot"]["finished_at"]
+        assert final == events[-1]["data"]["snapshot"]
+        replay = client.get(f"/api/runs/{rid}/events?after={events[-2]['seq']}")
+        assert '"type":"terminal"' in replay.text
+        assert client.get(f"/api/runs/{rid}/events?after={final['last_seq']}").text == ""
 
 
 def test_api_cancellation_and_cross_origin_rejection():

@@ -38,14 +38,14 @@ MAX_RESPONSE_BYTES = 262144
 MAX_TEXT_CHARS = 12000
 REQUEST_TIMEOUT = 15.0
 SOURCE_ID_PATTERN = r"gw_[a-f0-9]{32}"
-_CATEGORIES = frozenset({"invalid_input", "unavailable", "quota", "auth", "timeout", "security", "oversize", "budget"})
+WEB_FAILURE_CATEGORIES = frozenset({"invalid_input", "unavailable", "quota", "auth", "timeout", "security", "oversize", "budget"})
 
 
 class GeneralWebError(RuntimeError):
     """Closed category and fixed message; never carries upstream error payloads."""
 
     def __init__(self, category):
-        self.category = category if category in _CATEGORIES else "unavailable"
+        self.category = category if type(category) is str and category in WEB_FAILURE_CATEGORIES else "unavailable"
         super().__init__("General web retrieval: " + self.category)
 
 
@@ -106,6 +106,13 @@ class GeneralWebStore:
         self._closed = False
         self._client = httpx.AsyncClient(transport=transport, trust_env=False,
                                   follow_redirects=False, timeout=REQUEST_TIMEOUT)
+
+    def remaining_budget(self):
+        """Snapshot the actual request counters; cache hits never consume them."""
+        blocked = self._blocked or ("unavailable" if self._closed or not self._key else None)
+        return {"search": 0 if blocked else self._limits["search"] - self._counts["search"],
+                "read": 0 if blocked else self._limits["contents"] - self._counts["contents"],
+                "status": blocked or "available"}
 
     async def close(self):
         async with self._lock:
