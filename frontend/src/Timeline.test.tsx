@@ -5,6 +5,12 @@ import { snapshot } from './test/fixtures';
 import type { RunEvent } from './types';
 const event = (seq: number, type: string, data: Record<string, unknown> = {}): RunEvent => ({seq, type, run_id: 'run-1', timestamp: `2026-01-01T00:00:0${seq}Z`, data: { snapshot: snapshot({ last_seq: seq, stage: 'Researcher' }), ...data }});
 describe('observable timeline', () => {
+  it('distinguishes recoverable local budget from fatal quota without arbitrary categories', () => {
+    render(<Timeline events={[event(1,'tool_error',{tool:'web_search',web_category:'budget',recoverable:true}),event(2,'tool_error',{tool:'read_page',web_category:'quota',recoverable:false}),event(3,'tool_error',{web_category:'SECRET'})]} complete lastSeq={3}/>);
+    expect(screen.getByText(/web_category=budget · 기존 근거로 계속/)).toBeVisible();
+    expect(screen.getByText(/web_category=quota/)).toBeVisible();
+    expect(screen.queryByText(/SECRET/)).not.toBeInTheDocument();
+  });
   it('shows safe served model, fallback badge, latency and token metrics', () => {
     render(<Timeline events={[event(1,'model_complete',{observation:{served_by:'research-secondary',gateway_model_name:'openai/mock-secondary',fallback:true,latency_ms:120.5,input_tokens:11,output_tokens:7,total_tokens:18,reasoning_tokens:3,unexplained_token_residual:0,estimated_cost_usd:0.00005,attempted_fallbacks:1,rate_limit_remaining_requests:29}})]} complete lastSeq={1}/>);
     expect(screen.getByText('fallback 발생')).toBeVisible();

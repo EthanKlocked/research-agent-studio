@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import math
-from backend.errors import error_category, safe_exception_classes, safe_web_category
+from backend.errors import error_category, safe_exception_classes, safe_web_category, web_failure_reason
 from backend.schemas import ROLE_SCHEMAS
 from collections import OrderedDict, deque
 from copy import deepcopy
@@ -13,7 +13,7 @@ from langsmith import tracing_context
 from backend.workflow import build_graph
 from backend.mcp_client import ToolFailure, document_session
 
-TERMINAL = {"success", "limit_reached", "empty", "out_of_scope", "error", "cancelled"}
+TERMINAL = {"success", "limit_reached", "empty", "out_of_scope", "unsupported", "budget_exhausted", "error", "cancelled"}
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -71,8 +71,9 @@ def safe_error(exc):
     return "실행 오류: 모델 응답 또는 출력 검증에 실패했습니다."
 
 class RunManager:
-    def __init__(self, settings):
+    def __init__(self, settings, *, clock=None):
         self.settings = settings
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.runs = OrderedDict()
         self.tasks = {}
 
@@ -115,7 +116,12 @@ class RunManager:
             self.runs.pop(old)
             self.tasks.pop(old)
         run_id = uuid4().hex
-        state = dict(run_id=run_id, question=request.question, mode=request.mode, status="queued", stage=None, iteration=0, started_at=now(), finished_at=None, last_seq=0, interpreted_request="", plan=[], evidence=[], unavailable_sources=[], report=None, revisions=[], evaluation=None, feedback=[], errors=[], partial_result=None, cost_summary=None)
+        instant = self.clock()
+        if instant.utcoffset() is None:
+            raise ValueError("Run clock must be timezone-aware")
+        context = {"started_at": instant.isoformat(), "current_date": instant.date().isoformat(),
+                   "timezone": instant.tzname()}
+        state = dict(run_id=run_id, question=request.question, mode=request.mode, status="queued", stage=None, iteration=0, started_at=context["started_at"], run_context=context, unsupported_reason=None, web_budget_exhausted=[], finished_at=None, last_seq=0, interpreted_request="", plan=[], evidence=[], unavailable_sources=[], report=None, revisions=[], evaluation=None, feedback=[], errors=[], partial_result=None, cost_summary=None)
         self.runs[run_id] = RunRecord(state, deque(maxlen=self.settings.max_events))
         self.tasks[run_id] = asyncio.create_task(self.execute(run_id, request))
         return self.snapshot(run_id)
@@ -127,14 +133,19 @@ class RunManager:
             with tracing_context(enabled=False):
                 async with asyncio.timeout(self.settings.run_timeout):
                     if request.mode == "live" and self.settings.general_web_enabled:
+                        # Classify before even starting MCP: unsupported requests
+                        # must not depend on tool infrastructure availability.
+                        listener = build_graph(self.settings, request.mode, request.scenario, publish, listener_only=True)
+                        result = await listener.ainvoke(self.snapshot(run_id), config={"recursion_limit":32, "callbacks":[]})
                         # Own the AnyIO/MCP lifetime in this task, around the entire
-                        # graph, not across node tasks. Discovery never closes it.
-                        async with document_session(timeout=self.settings.mcp_timeout,
-                                max_tool_calls=self.settings.max_tool_calls,
-                                max_tool_corrections=self.settings.max_tool_corrections,
-                                search_provider="exa", exa_api_key=self.settings.exa_api_key) as client:
-                            graph = build_graph(self.settings, request.mode, request.scenario, publish, persistent_client=client)
-                            result = await graph.ainvoke(self.snapshot(run_id), config={"recursion_limit":32, "callbacks":[]})
+                        # research graph, not across node tasks. Discovery never closes it.
+                        if result["status"] not in TERMINAL:
+                            async with document_session(timeout=self.settings.mcp_timeout,
+                                    max_tool_calls=self.settings.max_tool_calls,
+                                    max_tool_corrections=self.settings.max_tool_corrections,
+                                    search_provider="exa", exa_api_key=self.settings.exa_api_key) as client:
+                                graph = build_graph(self.settings, request.mode, request.scenario, publish, persistent_client=client, entry="Planner")
+                                result = await graph.ainvoke(result, config={"recursion_limit":32, "callbacks":[]})
                     else:
                         graph = build_graph(self.settings, request.mode, request.scenario, publish)
                         result = await graph.ainvoke(self.snapshot(run_id), config={"recursion_limit":32, "callbacks":[]})
@@ -152,6 +163,9 @@ class RunManager:
                 "retrieval_incomplete":"검색 결과는 있지만 본문 구간을 조회하지 않았습니다. 근거 없음과는 다른 오류입니다.",
             }
             message = messages.get(category, safe_error(exc))
+            web_category = safe_web_category(exc)
+            if web_category != "none":
+                message += f" [web_category={web_category}] " + web_failure_reason(web_category)
             logging.getLogger(__name__).warning("run_failed role=%s category=%s classes=%s web_category=%s", role, category, safe_exception_classes(exc), safe_web_category(exc))
             state.update(status="error", errors=[f"[{role}/{category}] {message}"])
             checkpoint = self.runs[run_id].validated_state

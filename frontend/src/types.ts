@@ -5,6 +5,8 @@ export type Status =
   | "limit_reached"
   | "empty"
   | "out_of_scope"
+  | "unsupported"
+  | "budget_exhausted"
   | "error"
   | "cancelled";
 export type Stage =
@@ -55,6 +57,9 @@ export interface CostSummary {
   estimate_status: "unknown" | "partial" | "complete";
 }
 export interface Snapshot {
+  run_context?: { started_at: string; current_date: string; timezone: string } | null;
+  unsupported_reason?: string | null;
+  web_budget_exhausted?: ("search" | "read")[];
   cost_summary?: CostSummary | null;
   run_id: string;
   question: string;
@@ -90,6 +95,8 @@ export interface RunEvent {
     state_fields?: string[];
     changed_fields?: string[];
     reason?: string;
+    web_category?: string;
+    recoverable?: boolean;
     branch?: string;
     role?: Stage;
     model_call_id?: string;

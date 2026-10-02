@@ -55,6 +55,62 @@ async function start() {
   return Stream.instances[0];
 }
 describe("workbench", () => {
+  it.each(["stream", "restore", "reconnect"])("shows unsupported and budget outcomes honestly via %s", async (delivery) => {
+    const final = snapshot({status:"unsupported", stage:"Listener", iteration:0, last_seq:8,
+      finished_at:"2026-10-02T00:01:12Z", errors:[], unsupported_reason:"개인 맞춤 종목 추천 대신 공시 비교를 요청해 주세요.",
+      run_context:{started_at:"2026-10-02T00:01:00Z",current_date:"2026-10-02",timezone:"UTC"}});
+    if(delivery === "restore") {
+      sessionStorage.setItem("research-studio.run-id", "run-1");
+      vi.mocked(fetch).mockImplementation(async url => ({ok:true,json:async()=>url==="/api/config"?config:final} as Response));
+      render(<App/>);
+    } else {
+      const stream=await start();
+      if(delivery === "stream") {
+        act(()=>stream.emit({...final,finished_at:null}));
+        expect(stream.close).not.toHaveBeenCalled();
+        act(()=>stream.emit({...final,last_seq:9},"terminal"));
+      } else {
+        vi.mocked(fetch).mockResolvedValueOnce({ok:true,json:async()=>final} as Response);
+        act(()=>stream.onerror?.());
+      }
+    }
+    expect(await screen.findByText("지원하지 않는 요청입니다",{}, {timeout:3500})).toBeVisible();
+    expect(screen.getByText(final.unsupported_reason!)).toBeVisible();
+    expect(screen.getByText("실행 기준일 2026-10-02 · UTC")).toBeVisible();
+    expect(screen.queryByText("조사가 완료되었습니다")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await waitFor(()=>expect(screen.getByRole("button",{name:"조사 시작"})).toBeEnabled());
+    if(delivery !== "restore") expect(Stream.instances[0].close).toHaveBeenCalled();
+  });
+  it.each(["restore", "reconnect"])("restores budget-limited report via %s", async (delivery) => {
+    const final=snapshot({status:"budget_exhausted",last_seq:15,finished_at:"2026-01-01T00:00:12Z",web_budget_exhausted:["read"],
+      report:{title:"예산 제한 보고서",summary:"부분 근거",claims:[{text:"검증된 사실",citation_ids:["e1"]}],limitations:["본문 조회 예산 소진"]}});
+    if(delivery==="restore") {
+      sessionStorage.setItem("research-studio.run-id","run-1");
+      vi.mocked(fetch).mockImplementation(async url=>({ok:true,json:async()=>url==="/api/config"?config:final} as Response));
+      render(<App/>);
+    } else {
+      const stream=await start();
+      vi.mocked(fetch).mockResolvedValueOnce({ok:true,json:async()=>final} as Response);
+      act(()=>stream.onerror?.());
+    }
+    expect(await screen.findByText("웹 조회 예산을 소진했습니다",{}, {timeout:3500})).toBeVisible();
+    expect(screen.getByText("예산 제한 보고서")).toBeVisible();
+    expect(screen.getByText(/조사 완전성을 보장하지 않습니다/)).toBeVisible();
+    expect(screen.queryByText("조사가 완료되었습니다")).not.toBeInTheDocument();
+  });
+  it.each([false,true])("shows budget exhaustion with evidence=%s, never full success", async (evidence) => {
+    const stream=await start();
+    const report={title:"부분 조사",summary:"검증된 범위",claims:[{text:"기존 근거",citation_ids:["e1"]}],limitations:["예산 소진"]};
+    act(()=>stream.emit(snapshot({status:"budget_exhausted",last_seq:10,finished_at:"2026-01-01T00:00:12Z",
+      web_budget_exhausted:["search"],report:evidence?report:null}),"terminal"));
+    expect(screen.getByText("웹 조회 예산을 소진했습니다")).toBeVisible();
+    expect(screen.getByText(/조사 완전성을 보장하지 않습니다/)).toBeVisible();
+    expect(screen.queryByText("조사가 완료되었습니다")).not.toBeInTheDocument();
+    if(evidence) expect(screen.getByText("부분 조사")).toBeVisible();
+    else expect(screen.getByText("보고서를 작성할 근거가 부족합니다")).toBeVisible();
+    expect(stream.close).toHaveBeenCalled();
+  });
   it.each(["stream", "restore", "reconnect"])("keeps authoritative run costs without summing replayed events via %s", async (delivery) => {
     const final=snapshot({mode:'live',status:'success',last_seq:200,finished_at:'2026-01-01T00:00:12Z',
       cost_summary:{model_requests:3,priced_requests:2,unknown_requests:1,known_estimated_cost_usd:0.125,estimated_cost_usd:null,estimate_status:'partial'}});
