@@ -1,5 +1,9 @@
 # Verification scope
 
+## Optional LiteLLM gateway
+
+The optional pinned Proxy now has a separate [verification report](gateway-verification.md) and [Windows/macOS operator guide](gateway.md). Final macOS execution including the real Docker Proxy and mock upstream: **492 Python tests passed**; frontend **74 tests**, TypeScript and build passed. These are mock/provider-protocol checks, not live model, Windows, billing or production-operation verification. Independent review remains a separate merge gate.
+
 ## Request/Reporter deadlines and omitted search limits
 
 `PYTHON_DOTENV_DISABLED=1 uv run --locked --extra dev python -m pytest tests -q` passes **468 Python tests in 61.44s** on macOS. Before production changes, the new regression file produced **20 expected failures and 70 passes**: old 30s/60s request/Reporter defaults and invalid summaries for omitted limits. After the fix, the focused new/default, summary and stabilization suites passed **114 tests**.

@@ -1,0 +1,30 @@
+# Test-only endpoints and keys; no provider credentials are inherited.
+name: research-gateway-mock
+services:
+  gateway:
+    image: ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd
+    ports: ["127.0.0.1::4000"]
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000", "--num_workers", "1"]
+    environment:
+      LITELLM_MASTER_KEY: sk-offline-test-only-not-a-real-key
+      PRIMARY_MODEL: openai/mock-primary
+      PRIMARY_BASE_URL: http://upstream:8080/v1
+      PRIMARY_API_KEY: offline-upstream-only
+      SECONDARY_MODEL: openai/mock-secondary
+      SECONDARY_BASE_URL: http://upstream:8080/v1
+      SECONDARY_API_KEY: offline-upstream-only
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      LITELLM_LOG: "ERROR"
+      LITELLM_TELEMETRY: "False"
+    depends_on: [upstream]
+    networks: [offline]
+  upstream:
+    image: ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd
+    entrypoint: ["python", "/mock/upstream.py"]
+    volumes: ["../tests/gateway/upstream.py:/mock/upstream.py:ro"]
+    ports: ["127.0.0.1::8080"]
+    networks: [offline]
+networks:
+  offline: {}
