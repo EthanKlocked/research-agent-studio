@@ -114,7 +114,7 @@ curl --fail-with-body -sS http://127.0.0.1:8765/api/runs \
 
 기존 직접 연결·오프라인 fixture를 유지하면서 **Agent → localhost LiteLLM Proxy → 두 OpenAI-compatible upstream** 경로를 선택할 수 있습니다. 앱과 MCP는 호스트에서 계속 실행하고, `gateway/`의 고정 이미지 Proxy만 Docker Compose로 실행합니다. `research-primary` / `research-secondary` 별칭, 한 번의 fallback, gateway 인증과 deployment별 실제 RPM 제한을 구성합니다. 전 역할은 같은 설정 별칭을 쓰며 MCP 도구는 Proxy를 거치지 않습니다.
 
-[Windows/macOS 설치·키 없는 mock 검증·선택적 실제 연결·종료 및 학습 가이드](docs/gateway.md)를 먼저 읽으세요. 키 없는 통합 테스트는 **실제 LiteLLM + 로컬 mock upstream + 기존 graph/Agent/MCP**를 사용하며 live 모델의 품질·과금·Windows 실행을 검증하지 않습니다. 요청 상관관계·지연·응답 token usage는 안전한 앱 로그로 기록하고, 모르는 usage/가격은 `null`입니다. DB/Redis/유료 라이선스는 필수가 아니며 영속 예산/분산 운영은 포함하지 않습니다.
+[Windows/macOS 설치·키 없는 mock 검증·선택적 실제 연결·종료 및 학습 가이드](docs/gateway.md)를 먼저 읽으세요. 키 없는 통합 테스트는 **실제 LiteLLM + 로컬 mock upstream + 기존 graph/Agent/MCP**를 사용하며 live 모델의 품질·과금·Windows 실행을 검증하지 않습니다. 요청 상관관계·지연·응답 token usage는 안전한 앱 로그로 기록합니다. `gateway/app.env.example`을 호스트 앱 설정에 병합하면 gateway용 timeout 예산과 관측 opt-in을 적용할 수 있습니다. 타임라인에 검증된 `served_by` 별칭 / `fallback`을 표시하고, 알 수 없으면 unknown으로 남깁니다. 명시적 reasoning tokens와 미설명 토큰 차액은 구분하며, 가격은 운영자가 등록한 경우에만 추정합니다. 모르는 usage/가격과 실제 청구액은 `null`입니다. [런타임 피드백 변경 검증](docs/gateway-feedback-verification.md)을 참고하세요. DB/Redis/유료 라이선스는 필수가 아니며 영속 예산/분산 운영은 포함하지 않습니다.
 
 ## 선택: Exa 일반 웹 검색
 

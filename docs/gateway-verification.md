@@ -1,5 +1,7 @@
 # LiteLLM gateway verification — 2026-10-02
 
+Historical initial implementation report. For Issue #26 runtime-feedback changes and current verification, see [the follow-up report](gateway-feedback-verification.md).
+
 Implementation revision: `119e2ad8f7c73d77c30997d7749c3f70a56be813` (the tested source tree was committed unchanged). Base: `ed9e76fda38cc32b82ba3e8bb5da8b4f84122818`. Follow-up changes to this report/index are documentation only.
 
 Environment: macOS 14.7 (23H124), arm64, Python 3.12.13, Node 22.22.0, Docker Desktop 4.40.0 / Engine 28.0.4, Compose 2.34.0. Image package version independently read with `importlib.metadata.version('litellm')`: **1.103.2**. Registry manifest lists amd64 and arm64; only arm64 was executed here. Image/digest and operator steps: [gateway guide](gateway.md).

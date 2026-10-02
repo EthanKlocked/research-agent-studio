@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+import yaml
 from backend.config import Settings
 from backend.manager import RunManager
 from backend.schemas import RunRequest
@@ -24,11 +25,24 @@ KEY = "sk-offline-test-only-not-a-real-key"
 
 @pytest.fixture(scope="module")
 def stack():
+    image = yaml.safe_load((ROOT / "gateway/compose.mock.yaml").read_text(encoding="utf-8"))["services"]["gateway"]["image"]
+    check = subprocess.run(["docker", "image", "inspect", image, "--format", "{{.Id}}"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert check.returncode == 0, f"Pinned gateway image/daemon unavailable. Run docker version, then docker pull {image}; rerun with RAS_GATEWAY_TEST=1. This is not a passed proxy check."
     project = "ras-gateway-test-" + uuid4().hex[:10]
     with tempfile.TemporaryDirectory() as directory:
         envfile = Path(directory) / "empty.env"
         envfile.write_text("", encoding="utf-8")
-        command = ["docker", "compose", "--env-file", str(envfile), "-p", project, "-f", str(ROOT / "gateway/compose.mock.yaml")]
+        # Same operator config, only time budgets shortened for bounded failure tests.
+        config = yaml.safe_load((ROOT / "gateway/config.yaml").read_text(encoding="utf-8"))
+        for deployment in config["model_list"]:
+            deployment["litellm_params"]["timeout"] = 1
+        config["litellm_settings"]["request_timeout"] = 1
+        config["router_settings"]["timeout"] = 3
+        config_path = Path(directory) / "config.yaml"
+        config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        override = Path(directory) / "override.yaml"
+        override.write_text(yaml.safe_dump({"services": {"gateway": {"volumes": [str(config_path) + ":/app/config.yaml:ro"]}}}), encoding="utf-8")
+        command = ["docker", "compose", "--env-file", str(envfile), "-p", project, "-f", str(ROOT / "gateway/compose.mock.yaml"), "-f", str(override)]
         def compose(*args):
             result = subprocess.run([*command, *args], check=True, capture_output=True, text=True, encoding="utf-8", timeout=180)
             return result.stdout + result.stderr if args[0] == "logs" else result.stdout
@@ -47,7 +61,7 @@ def stack():
                     if time.monotonic() > deadline:
                         raise AssertionError("Gateway did not become healthy; inspect isolated Compose startup")
                     time.sleep(.25)
-                yield client, gateway, upstream, compose
+                yield [client, gateway, upstream, compose]
         finally:
             compose("down", "--volumes", "--remove-orphans")
 
@@ -67,6 +81,20 @@ def completion(stack, model="research-primary", key=KEY):
                          json={"model": model, "messages": [{"role": "user", "content": "offline-private-prompt-marker"}]})
 
 
+def test_optional_header_contract(stack):
+    stack[3]("restart", "gateway")
+    wait_healthy(stack)
+    for scenario, model_name, fallbacks in [("normal", "openai/mock-primary", "0"), ("fail-503", "openai/mock-secondary", "1")]:
+        control(stack, scenario)
+        response = completion(stack)
+        assert response.status_code == 200
+        assert response.headers["x-litellm-model-name"] == model_name
+        assert response.headers["x-litellm-attempted-fallbacks"] == fallbacks
+        assert response.headers["x-ratelimit-remaining-requests"] == "29"
+    stack[3]("restart", "gateway")
+    wait_healthy(stack)
+
+
 def test_auth_and_aliases(stack):
     control(stack, "normal")
     assert completion(stack, key=None).status_code == 401
@@ -80,6 +108,7 @@ def test_auth_and_aliases(stack):
         assert response.json()["model"] == alias  # normal route exposes the public alias
         assert response.json()["usage"] == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
         assert response.headers.get("x-litellm-call-id")
+        assert response.headers["x-litellm-model-id"] == ("01" if alias == "research-primary" else "02") * 32
     assert [a["model"] for a in attempts(stack)] == ["mock-primary", "mock-secondary"]
     assert all(a["auth_ok"] for a in attempts(stack))
 
@@ -90,12 +119,13 @@ def test_fallback_actual_upstream_count(stack, code):
     response = completion(stack)
     assert response.status_code == 200, response.text
     assert response.json()["model"] == "mock-secondary"
+    assert response.headers["x-litellm-model-id"] == "02" * 32
     assert [a["model"] for a in attempts(stack)] == ["mock-primary", "mock-secondary"]
 
 
 def settings(stack, **kwargs):
     return Settings(provider="openai-compatible", model="research-primary", api_key=KEY,
-                    base_url=stack[1] + "/v1", **kwargs)
+                    base_url=stack[1] + "/v1", gateway_observation=True, gateway_model_names={"research-primary": "openai/mock-primary", "research-secondary": "openai/mock-secondary"}, **kwargs)
 
 
 @pytest.mark.parametrize("fallback", [False, True])
@@ -103,7 +133,7 @@ async def test_real_graph_mcp_and_safe_usage(stack, caplog, monkeypatch, fallbac
     monkeypatch.setenv("RESEARCH_PUBLIC_SOURCES", "0")
     control(stack, "fail-503" if fallback else "normal")
     caplog.set_level(logging.INFO, logger="research.model")
-    manager = RunManager(settings(stack))
+    manager = RunManager(settings(stack, token_prices={"research-primary": {"input": 2, "output": 4}, "research-secondary": {"input": 3, "output": 6}}))
     state = await manager.start(RunRequest(question="revenue", mode="live"))
     await manager.tasks[state["run_id"]]
     final = manager.snapshot(state["run_id"])
@@ -116,9 +146,20 @@ async def test_real_graph_mcp_and_safe_usage(stack, caplog, monkeypatch, fallbac
     assert {r["model_call_id"] for r in records} == {e["data"]["model_call_id"] for e in starts}
     assert {r["role"] for r in records} == {"Listener", "Planner", "Researcher", "Reporter", "Evaluator"}
     assert all(r["run_id"] == state["run_id"] and r["gateway_call_id"] and r["gateway_model_id"] for r in records)
+    assert all(r["served_by"] == ("research-secondary" if fallback else "research-primary") and r["fallback"] is fallback for r in records)
+    completes = [e["data"] for e in manager.runs[state["run_id"]].events if e["type"] == "model_complete"]
+    assert len(completes) == 7
+    assert all(e["observation"]["served_by"] == records[0]["served_by"] and e["observation"]["fallback"] is fallback for e in completes)
     assert len({r["gateway_call_id"] for r in records}) == 7
     assert all(r["total_tokens"] == 18 and r["input_tokens"] == 11 and r["output_tokens"] == 7 for r in records)
-    assert all(r["estimated_cost_usd"] is None for r in records)
+    expected_cost = (11 * (3 if fallback else 2) + 7 * (6 if fallback else 4)) / 1_000_000
+    assert all(r["estimated_cost_usd"] == expected_cost for r in records)
+    assert all(r["gateway_model_name"] == ("openai/mock-secondary" if fallback else "openai/mock-primary") and r["attempted_fallbacks"] == int(fallback) for r in records)
+    assert all(type(r["rate_limit_remaining_requests"]) is int for r in records)
+    assert all(e["observation"]["gateway_model_name"] == records[0]["gateway_model_name"] for e in completes)
+    assert final["cost_summary"]["estimated_cost_usd"] == pytest.approx(7 * expected_cost)
+    assert final["cost_summary"]["model_requests"] == final["cost_summary"]["priced_requests"] == 7
+    assert final["cost_summary"]["unknown_requests"] == 0
     assert KEY not in caplog.text
 
 
@@ -131,6 +172,19 @@ async def test_missing_usage_stays_unknown(stack, caplog):
     record = next(json.loads(r.message) for r in caplog.records if r.name == "research.model")
     assert record["total_tokens"] is None and record["input_tokens"] is None
     assert record["usage_source"] == "unknown"
+
+
+@pytest.mark.parametrize("scenario,reasoning,residual", [("reasoning", 3, 0), ("residual", None, 4)])
+async def test_usage_detail_contract_through_proxy(stack, caplog, scenario, reasoning, residual):
+    from backend.agents import RoleRunner
+    control(stack, scenario)
+    state = dict(question="offline", interpreted_request="", plan=[], evidence=[], report=None, feedback=[], iteration=0)
+    await RoleRunner(settings(stack, token_prices={"research-primary": {"input": 2, "output": 4}}), "live", "pass").invoke("Listener", state, [])
+    record = next(json.loads(r.message) for r in caplog.records if r.name == "research.model")
+    assert record["reasoning_tokens"] == reasoning
+    assert record["unexplained_token_residual"] == residual
+    assert record["output_tokens"] == 7
+    assert record["estimated_cost_usd"] == (0.00005 if residual == 0 else None)
 
 
 def test_timeout_fallback_is_bounded(stack):
@@ -175,22 +229,65 @@ async def test_run_deadline_and_cancel_during_fallback(stack, cancel, caplog):
     assert len(records) == 1 and records[0]["status"] == "cancelled"
 
 
+def wait_healthy(stack):
+    # Docker Desktop may reassign an ephemeral published port on restart.
+    stack[1] = "http://" + stack[3]("port", "gateway", "4000").strip()
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        try:
+            if stack[0].get(stack[1] + "/health/liveliness").status_code == 200:
+                return
+        except httpx.HTTPError:
+            pass
+        time.sleep(.25)
+    raise AssertionError("Restarted gateway did not become healthy")
+
+
 def test_real_rpm_limiter_rejects_before_upstream(stack):
-    control(stack, "normal")
-    # Secondary has no fallback. Earlier requests count against its same 30 RPM limit.
-    statuses = []
-    for _ in range(31):
-        before = len(attempts(stack))
-        response = completion(stack, "research-secondary")
-        statuses.append(response.status_code)
-        if response.status_code == 429:
-            assert len(attempts(stack)) == before
-            break
-        assert response.status_code == 200, response.text
-    assert 429 in statuses
+    from rpm_window import in_fresh_minute
+
+    def prepare():
+        # Every measurement gets fresh process counters and upstream history.
+        stack[3]("restart", "gateway")
+        wait_healthy(stack)
+        control(stack, "normal")
+
+    def gateway_utc():
+        # Pinned Router uses get_utc_datetime().strftime('%H-%M') keys.
+        # Read inside that container: host/Docker clocks need not agree.
+        return float(stack[3]("exec", "-T", "gateway", "python", "-c",
+                             "from datetime import datetime, timezone; "
+                             "print(datetime.now(timezone.utc).timestamp())"))
+
+    def burst():
+        statuses = []
+        for _ in range(31):
+            before = len(attempts(stack))
+            response = completion(stack, "research-secondary")
+            statuses.append(response.status_code)
+            if response.status_code == 429:
+                # Rollover can delay rejection, never justify an early one.
+                assert len(statuses) == 31, "Limiter rejected before request 31"
+                assert len(attempts(stack)) == before
+                break
+            assert response.status_code == 200, response.text
+        return statuses, len(attempts(stack))
+
+    statuses, upstream_count = in_fresh_minute(
+        prepare=prepare, now=gateway_utc, sleep=time.sleep, burst=burst,
+    )
+    # A same-window mismatch fails immediately, never 'eventually 429'.
+    assert statuses == [200] * 30 + [429]
+    assert upstream_count == 30
 
 
 def test_proxy_logs_do_not_echo_upstream_error(stack):
+    # Self-contained even with -k proxy_logs: reset limits then trigger failure.
+    stack[3]("restart", "gateway")
+    wait_healthy(stack)
+    control(stack, "fail-503")
+    assert completion(stack).status_code == 200
+    assert [a["model"] for a in attempts(stack)] == ["mock-primary", "mock-secondary"]
     logs = stack[3]("logs", "--no-color", "gateway")
     assert "private-marker" not in logs
     assert "offline-private-prompt-marker" not in logs
@@ -220,9 +317,12 @@ def test_operator_compose_starts_with_mock_endpoints(stack, tmp_path):
     try:
         compose("up", "-d", "--wait", "--wait-timeout", "120", "--pull", "never")
         url = "http://" + compose("port", "gateway", "4000").strip()
-        control(stack, "normal")
+        control(stack, "slow-primary")
+        started = time.monotonic()
         response = stack[0].post(url + "/v1/chat/completions", headers={"Authorization": "Bearer " + KEY}, json={"model": "research-primary", "messages": [{"role": "user", "content": "offline operator path"}]})
         assert response.status_code == 200
+        assert 10 < time.monotonic() - started < 30
+        assert response.headers["x-litellm-model-id"] == "01" * 32
         assert attempts(stack) == [{"model": "mock-primary", "auth_ok": True}]
     finally:
         compose("down", "--volumes", "--remove-orphans")
