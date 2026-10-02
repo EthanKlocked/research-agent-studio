@@ -3,6 +3,8 @@ import os
 import math
 import json
 import re
+import logging
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -23,6 +25,9 @@ class Settings:
     api_key: str = field(default="", repr=False)
     search_provider: str = field(default="", repr=False)
     exa_api_key: str = field(default="", repr=False)
+    run_timezone: str = ""
+    residual_pricing: str = "unknown"
+    gateway_router_timeout: float | None = None
     gateway_observation: bool = False
     gateway_model_names: dict = field(default_factory=dict, repr=False)
     token_prices: dict = field(default_factory=dict, repr=False)
@@ -47,6 +52,16 @@ class Settings:
         return getattr(self, role.lower() + "_timeout")
 
     def __post_init__(self):
+        if self.residual_pricing not in ("unknown", "output"):
+            raise ValueError("LLM_RESIDUAL_PRICING must be unknown or output")
+        if self.run_timezone:
+            try:
+                ZoneInfo(self.run_timezone)
+            except (ZoneInfoNotFoundError, ValueError, TypeError):
+                raise ValueError("RUN_TIMEZONE must be an available IANA timezone; sync project tzdata dependency") from None
+        value = self.gateway_router_timeout
+        if value is not None and (type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= 7200):
+            raise ValueError("LLM_GATEWAY_ROUTER_TIMEOUT must be finite seconds greater than 0 and at most 7200")
         name_error = "LLM_GATEWAY_MODEL_NAMES_JSON must map gateway aliases to public model names (1-128 safe characters)"
         if not isinstance(self.gateway_model_names, dict):
             raise ValueError(name_error)
@@ -71,6 +86,19 @@ class Settings:
                 raise ValueError(f"{env_name} must be finite seconds greater than 0 and at most 7200")
         if type(self.max_output_tokens) is not int or not 1 <= self.max_output_tokens <= 65536:
             raise ValueError("LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 65536")
+
+    def warn_gateway_timeouts(self):
+        if not self.gateway_observation and self.gateway_router_timeout is None:
+            return
+        logger = logging.getLogger("research.config")
+        guide = "Review gateway/app.env.example and align request, role and run budgets manually; no limits were changed."
+        router = self.gateway_router_timeout
+        if router is None:
+            logger.warning("Gateway timeout budget unknown. Set LLM_GATEWAY_ROUTER_TIMEOUT to your actual router budget. %s", guide)
+        elif self.model_timeout <= router:
+            logger.warning("Gateway timeout mismatch: LLM_REQUEST_TIMEOUT must exceed configured LLM_GATEWAY_ROUTER_TIMEOUT. %s", guide)
+        if any(self.role_timeout(role) <= self.model_timeout for role in ("Listener", "Planner", "Researcher", "Reporter", "Evaluator")):
+            logger.warning("Gateway timeout role budget may preempt a request or repair. %s", guide)
 
     @property
     def general_web_enabled(self):
@@ -111,4 +139,9 @@ class Settings:
                     timeouts[field_name] = float(raw)
                 except ValueError:
                     raise ValueError(f"{env_name} must be finite seconds greater than 0 and at most 7200") from None
-        return cls(**timeouts, gateway_model_names=model_names, gateway_observation=os.getenv("LLM_GATEWAY_OBSERVATION", "0") == "1", token_prices=prices, search_provider=os.getenv("SEARCH_PROVIDER", "").strip(), exa_api_key=os.getenv("EXA_API_KEY", "").strip(), max_output_tokens=tokens, provider=os.getenv("LLM_PROVIDER", "").strip(), model=os.getenv("LLM_MODEL", "").strip(), base_url=os.getenv("LLM_BASE_URL", "").strip(), api_key=os.getenv("LLM_API_KEY", "").strip(), test_mode=os.getenv("RESEARCH_TEST_MODE", "0") == "1")
+        router_raw = os.getenv("LLM_GATEWAY_ROUTER_TIMEOUT", "").strip()
+        try:
+            router_timeout = float(router_raw) if router_raw else None
+        except ValueError:
+            raise ValueError("LLM_GATEWAY_ROUTER_TIMEOUT must be finite seconds greater than 0 and at most 7200") from None
+        return cls(**timeouts, run_timezone=os.getenv("RUN_TIMEZONE", "").strip(), residual_pricing=os.getenv("LLM_RESIDUAL_PRICING", "").strip() or "unknown", gateway_router_timeout=router_timeout, gateway_model_names=model_names, gateway_observation=os.getenv("LLM_GATEWAY_OBSERVATION", "0") == "1", token_prices=prices, search_provider=os.getenv("SEARCH_PROVIDER", "").strip(), exa_api_key=os.getenv("EXA_API_KEY", "").strip(), max_output_tokens=tokens, provider=os.getenv("LLM_PROVIDER", "").strip(), model=os.getenv("LLM_MODEL", "").strip(), base_url=os.getenv("LLM_BASE_URL", "").strip(), api_key=os.getenv("LLM_API_KEY", "").strip(), test_mode=os.getenv("RESEARCH_TEST_MODE", "0") == "1")

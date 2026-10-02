@@ -52,11 +52,13 @@ export interface Revision {
   evaluation: Evaluation;
 }
 export interface CostSummary {
+  residual_priced_requests?: number;
   model_requests: number; priced_requests: number; unknown_requests: number;
   known_estimated_cost_usd: number | null; estimated_cost_usd: number | null;
   estimate_status: "unknown" | "partial" | "complete";
 }
 export interface Snapshot {
+  retained_events?: RunEvent[];
   run_context?: { started_at: string; current_date: string; timezone: string } | null;
   unsupported_reason?: string | null;
   web_budget_exhausted?: ("search" | "read")[];
@@ -110,6 +112,8 @@ export interface RunEvent {
       input_tokens?: number | null; output_tokens?: number | null; total_tokens?: number | null;
       reasoning_tokens?: number | null; unexplained_token_residual?: number | null;
       estimated_cost_usd?: number | null;
+      input_output_estimated_cost_usd?: number | null;
+      cost_assumption?: "residual_at_output_rate" | null;
     };
     purpose?: "planner_context" | "research_execution";
     tool_count?: number;

@@ -37,6 +37,8 @@ function ModelMetrics({observation: o}: {observation: NonNullable<RunEvent['data
     <p>served model: {name} · 지연 {latency}</p>
     <p>입력 {count(o.input_tokens)} · 출력 {count(o.output_tokens)} · 전체 {count(o.total_tokens)}</p>
     <p>reasoning {count(o.reasoning_tokens)} · 미설명 차액 {typeof o.unexplained_token_residual === 'number' && Number.isSafeInteger(o.unexplained_token_residual) ? String(o.unexplained_token_residual) : 'unknown'} · 추정 {estimatedUsd(o.estimated_cost_usd)}</p>
+    {o.input_output_estimated_cost_usd != null && <p>입력·출력 소계 {estimatedUsd(o.input_output_estimated_cost_usd)} · 차액 제외</p>}
+    {o.cost_assumption === "residual_at_output_rate" && <p>추정 가정: 미설명 차액을 출력 단가로 계산 · reasoning으로 단정하지 않음</p>}
     <p>fallback 시도 {count(o.attempted_fallbacks)} · 남은 요청 {count(o.rate_limit_remaining_requests)} (응답 헤더 · 계정 잔액 아님)</p>
   </div>;
 }

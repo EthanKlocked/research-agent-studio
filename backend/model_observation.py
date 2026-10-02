@@ -55,14 +55,21 @@ def record_model_call(*, run_id, role, call_id, model, started, status, response
         reasoning = None
     residual = total - input_tokens - output_tokens if known and input_tokens is not None and output_tokens is not None else None
     # Reasoning may already be included in completion_tokens. Never add it again.
-    # An unexplained residual prevents a complete two-rate estimate.
+    # Positive residuals stay unknown unless explicitly priced by assumption.
     price_label = served_by if gateway else "configured-model"
     rates = settings.token_prices.get(price_label) if settings is not None else None
-    estimate = None
-    if rates is not None and residual == 0:
+    estimate = subtotal = None
+    assumption = None
+    if rates is not None and residual is not None and residual >= 0:
         try:
             value = (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
-            estimate = value if math.isfinite(value) else None
+            subtotal = value if math.isfinite(value) else None
+            if residual == 0:
+                estimate = subtotal
+            elif settings is not None and settings.residual_pricing == "output":
+                value += residual * rates["output"] / 1_000_000
+                estimate = value if math.isfinite(value) else None
+                assumption = "residual_at_output_rate" if estimate is not None else None
         except OverflowError:
             estimate = None
     record = {
@@ -78,6 +85,7 @@ def record_model_call(*, run_id, role, call_id, model, started, status, response
         "total_tokens": total if known else None,
         "usage_source": "response_reported" if known else "unknown",
         "estimated_cost_usd": estimate, "billing_cost_usd": None,
+        "input_output_estimated_cost_usd": subtotal, "cost_assumption": assumption,
     }
     LOGGER.info(json.dumps(record, ensure_ascii=True))
     return record

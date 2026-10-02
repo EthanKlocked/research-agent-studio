@@ -11,6 +11,7 @@ dependencies = [
     "langsmith==0.14.1",
     "mcp>=1.12,<2",
     "python-dotenv>=1,<2",
+    "tzdata>=2025.2",
     "httpx>=0.28,<1",
     "langchain-mcp-adapters==0.3.2",
 ]

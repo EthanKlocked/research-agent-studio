@@ -651,7 +651,7 @@ export default function App() {
                 <p className="muted small">
                   실제 도구 호출 내역이 표시됩니다.
                   {s && isComplete(s)
-                    ? " 재접속 이전 이벤트는 재생하지 않습니다."
+                    ? " 서버에 남은 최대 150건을 복구합니다. 전체 기록은 아닐 수 있습니다."
                     : ""}
                 </p>
               )}

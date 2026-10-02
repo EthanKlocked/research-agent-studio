@@ -59,6 +59,17 @@ async def test_invalid_or_missing_cost_stays_unknown(cost):
     assert result["unknown_requests"] == 1
 
 
+async def test_residual_assumptions_survive_eviction_and_duplicates():
+    manager, state = run_manager()
+    data = {"model_call_id": "a" * 32, "observation": {"estimated_cost_usd": 0.1, "cost_assumption": "residual_at_output_rate"}}
+    await manager.emit(state["run_id"], "model_complete", state, data)
+    await manager.emit(state["run_id"], "model_complete", state, data)
+    for _ in range(3): await emit(manager, state, "node_complete")
+    summary = manager.snapshot(state["run_id"])["cost_summary"]
+    assert summary["residual_priced_requests"] == 1
+    assert summary["model_requests"] == 1 and summary["estimated_cost_usd"] == 0.1
+
+
 async def test_fixture_mode_never_claims_real_cost():
     manager, state = run_manager("test")
     assert await emit(manager, state, "model_complete", cost=0.1) is None

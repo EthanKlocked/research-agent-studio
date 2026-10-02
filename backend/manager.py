@@ -8,6 +8,7 @@ from collections import OrderedDict, deque
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 from langsmith import tracing_context
 from backend.workflow import build_graph
@@ -33,6 +34,7 @@ class RunRecord:
     validated_state: dict | None = None
     # Per model-call ID, separate from bounded/replayed events: (completed, estimate).
     model_costs: dict = field(default_factory=dict)
+    residual_priced_calls: set = field(default_factory=set)
 
     def observe_cost(self, kind, data):
         call = (data or {}).get("model_call_id")
@@ -47,6 +49,8 @@ class RunRecord:
             except OverflowError:
                 valid = False
             self.model_costs[call] = (True, value if valid else None)
+            if valid and ((data or {}).get("observation") or {}).get("cost_assumption") == "residual_at_output_rate":
+                self.residual_priced_calls.add(call)
 
     def cost_summary(self):
         known = [value for _, value in self.model_costs.values() if value is not None]
@@ -57,7 +61,8 @@ class RunRecord:
         except OverflowError:
             subtotal = None
         unknown = len(self.model_costs) - len(known)
-        return {"model_requests": len(self.model_costs), "priced_requests": len(known),
+        return {**({"residual_priced_requests": len(self.residual_priced_calls)} if self.residual_priced_calls else {}),
+                "model_requests": len(self.model_costs), "priced_requests": len(known),
                 "unknown_requests": unknown, "known_estimated_cost_usd": subtotal,
                 "estimated_cost_usd": subtotal if unknown == 0 else None,
                 "estimate_status": "unknown" if subtotal is None else "partial" if unknown else "complete"}
@@ -73,7 +78,7 @@ def safe_error(exc):
 class RunManager:
     def __init__(self, settings, *, clock=None):
         self.settings = settings
-        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.clock = clock or (lambda: datetime.now().astimezone())
         self.runs = OrderedDict()
         self.tasks = {}
 
@@ -119,8 +124,10 @@ class RunManager:
         instant = self.clock()
         if instant.utcoffset() is None:
             raise ValueError("Run clock must be timezone-aware")
+        if self.settings.run_timezone:
+            instant = instant.astimezone(ZoneInfo(self.settings.run_timezone))
         context = {"started_at": instant.isoformat(), "current_date": instant.date().isoformat(),
-                   "timezone": instant.tzname()}
+                   "timezone": self.settings.run_timezone or instant.tzname()}
         state = dict(run_id=run_id, question=request.question, mode=request.mode, status="queued", stage=None, iteration=0, started_at=context["started_at"], run_context=context, unsupported_reason=None, web_budget_exhausted=[], finished_at=None, last_seq=0, interpreted_request="", plan=[], evidence=[], unavailable_sources=[], report=None, revisions=[], evaluation=None, feedback=[], errors=[], partial_result=None, cost_summary=None)
         self.runs[run_id] = RunRecord(state, deque(maxlen=self.settings.max_events))
         self.tasks[run_id] = asyncio.create_task(self.execute(run_id, request))

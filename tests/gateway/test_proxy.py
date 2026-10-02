@@ -175,16 +175,20 @@ async def test_missing_usage_stays_unknown(stack, caplog):
 
 
 @pytest.mark.parametrize("scenario,reasoning,residual", [("reasoning", 3, 0), ("residual", None, 4)])
-async def test_usage_detail_contract_through_proxy(stack, caplog, scenario, reasoning, residual):
+@pytest.mark.parametrize("policy", ["unknown", "output"])
+async def test_usage_detail_contract_through_proxy(stack, caplog, scenario, reasoning, residual, policy):
     from backend.agents import RoleRunner
     control(stack, scenario)
     state = dict(question="offline", interpreted_request="", plan=[], evidence=[], report=None, feedback=[], iteration=0)
-    await RoleRunner(settings(stack, token_prices={"research-primary": {"input": 2, "output": 4}}), "live", "pass").invoke("Listener", state, [])
+    await RoleRunner(settings(stack, residual_pricing=policy, token_prices={"research-primary": {"input": 2, "output": 4}}), "live", "pass").invoke("Listener", state, [])
     record = next(json.loads(r.message) for r in caplog.records if r.name == "research.model")
     assert record["reasoning_tokens"] == reasoning
     assert record["unexplained_token_residual"] == residual
     assert record["output_tokens"] == 7
-    assert record["estimated_cost_usd"] == (0.00005 if residual == 0 else None)
+    expected = 0.00005 if residual == 0 else 0.000066 if policy == "output" else None
+    assert record["estimated_cost_usd"] == (pytest.approx(expected) if expected is not None else None)
+    assert record["input_output_estimated_cost_usd"] == 0.00005
+    assert record["cost_assumption"] == ("residual_at_output_rate" if residual and policy == "output" else None)
 
 
 def test_timeout_fallback_is_bounded(stack):
