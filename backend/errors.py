@@ -15,6 +15,18 @@ class RetrievalIncomplete(ToolFailure):
     pass
 
 
+def web_failure_reason(category):
+    return {
+        "budget": "실행별 웹 조회 예산을 소진했습니다. 기존 근거만 사용할 수 있으며 조사가 불완전할 수 있습니다.",
+        "quota": "검색 제공자의 할당량 또는 요청 제한에 도달했습니다. 운영자가 잔액과 제한을 확인해야 합니다.",
+        "auth": "검색 제공자 인증에 실패했습니다. 운영자가 로컬 설정을 확인해야 합니다.",
+        "timeout": "웹 자료 조회 시간이 초과되었습니다.",
+        "security": "웹 자료가 허용된 보안 경계를 충족하지 않습니다.",
+        "oversize": "웹 자료 크기가 허용된 한도를 초과했습니다.",
+        "invalid_input": "웹 조회 입력이 허용된 형식을 충족하지 않습니다.",
+    }.get(category, "웹 자료를 조회하지 못했습니다. 검색 결과 없음과는 다릅니다.")
+
+
 def exception_chain(exc):
     """Cycle-safe traversal, including structured-concurrency siblings and causes."""
     pending, seen = [exc], set()

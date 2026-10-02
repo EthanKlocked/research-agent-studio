@@ -1,5 +1,9 @@
 # Verification scope
 
+## Current workflow runtime checks
+
+See [runtime verification](runtime-verification.md): **583 Python tests**, including 17 real Proxy/mock-upstream tests, and **96 frontend tests** passed on macOS; typecheck/build and deterministic browser checks at desktop/tablet/mobile passed. No current live or Windows execution. Earlier counts below are historical.
+
 ## Optional LiteLLM gateway
 
 The optional pinned Proxy now has a separate [verification report](gateway-verification.md) and [Windows/macOS operator guide](gateway.md). Final macOS execution including the real Docker Proxy and mock upstream: **492 Python tests passed**; frontend **74 tests**, TypeScript and build passed. These are mock/provider-protocol checks, not live model, Windows, billing or production-operation verification. Independent review remains a separate merge gate.

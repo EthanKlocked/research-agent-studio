@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 from backend.errors import OutputValidation
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Text = Annotated[str, Field(min_length=1, max_length=2500)]
 Short = Annotated[str, Field(min_length=1, max_length=300)]
@@ -24,6 +24,14 @@ class Interpretation(Strict):
     interpreted_request: Text
     # Missing legacy outputs remain undecided, never implicitly rejected.
     scope: Literal["in_scope", "partial", "unknown", "out_of_scope"] = "unknown"
+    request_support: Literal["supported", "partial", "unsupported", "unknown"] = "unknown"
+    unsupported_reason: Short | None = None
+
+    @model_validator(mode="after")
+    def support_explanation(self):
+        if self.request_support == "unsupported" and not (self.unsupported_reason or "").strip():
+            raise ValueError("Unsupported requests require an explanation")
+        return self
 
 class Plan(Strict):
     plan: Annotated[list[Short], Field(min_length=1, max_length=6)]

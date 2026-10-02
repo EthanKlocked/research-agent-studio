@@ -9,9 +9,9 @@ from langgraph.graph import StateGraph, START, END
 from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
 from backend.agents import RoleRunner
-from backend.errors import RetrievalIncomplete
+from backend.errors import RetrievalIncomplete, safe_web_category, web_failure_reason
 from backend.mcp_client import (
-    document_session, ToolFailure, RecoverableToolError,
+    document_session, ToolFailure, RecoverableToolError, WebToolFailure,
     SECTION_IDS, planner_tool_metadata,
 )
 from backend.schemas import ROLE_SCHEMAS, validate_citations
@@ -56,8 +56,11 @@ class WorkflowState(TypedDict):
     feedback: list[str]
     errors: list[str]
     partial_result: dict | None
+    run_context: dict
+    unsupported_reason: str | None
+    web_budget_exhausted: list[str]
 
-def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
+def build_graph(settings, mode, scenario, publish, *, persistent_client=None, entry="Listener", listener_only=False):
     runner = RoleRunner(settings, mode, scenario)
     runner.publish = publish
 
@@ -93,7 +96,10 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
         unavailable = {(s["document_id"], s["section_id"]): s for s in state.get("unavailable_sources", [])}
         failures = []
         search_hits = []
+        exhausted = set(state.get("web_budget_exhausted", []))
         async with research_session() as client:
+            if persistent_client is not None:
+                runner.web_budget = await client.remaining_web_budget()
             async def invoke_tool(name, args):
                 public_name = name if name in ("search_documents", "get_section", "web_search", "read_page") else "unknown"
                 call_id = uuid4().hex
@@ -105,8 +111,15 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
                     await publish("tool_error", state, {**public, "reason":"입력 오류로 재조회가 필요합니다."})
                     return {"error":{"code":"invalid_tool_input", "message":"Check tool arguments and search for valid document/section IDs before retrieving again."}}
                 except Exception as exc:
+                    category = safe_web_category(exc)
+                    if isinstance(exc, WebToolFailure) and category == "budget":
+                        exhausted.add("search" if name == "web_search" else "read")
+                        state["web_budget_exhausted"] = sorted(exhausted)
+                        remaining = await client.remaining_web_budget()
+                        await publish("tool_error", state, {**public, "web_category":"budget", "recoverable":True, "reason":web_failure_reason("budget")})
+                        return {"error":{"code":"web_budget_exhausted", "message":"Do not retry the exhausted operation. Finish with existing verified evidence and disclose incomplete coverage; never invent evidence."}, "remaining_run_web_budget":remaining}
                     failures.append(exc)
-                    await publish("tool_error", state, {**public, "reason": "자료 조회 도구가 실패했습니다."})
+                    await publish("tool_error", state, {**public, "web_category":category, "recoverable":False, "reason": web_failure_reason(category) if category != "none" else "자료 조회 도구가 실패했습니다."})
                     raise
                 if name in ("search_documents", "web_search"):
                     search_hits.extend(result)
@@ -143,10 +156,10 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
                 raise ToolFailure("Researcher did not call a document tool")
             if unavailable and not evidence:
                 raise ToolFailure("Optional sources unavailable and no evidence retrieved")
-            if search_hits and not evidence:
+            if search_hits and not evidence and not exhausted:
                 raise RetrievalIncomplete("Search matched but no section was retrieved")
             ROLE_SCHEMAS["Researcher"].model_validate(output)
-        return {"evidence":list(evidence.values()), "unavailable_sources":list(unavailable.values()), **({"status":"empty"} if not evidence else {})}
+        return {"evidence":list(evidence.values()), "unavailable_sources":list(unavailable.values()), "web_budget_exhausted":sorted(exhausted), **({"status":"budget_exhausted" if exhausted else "empty"} if not evidence else {})}
 
     def node(role):
         async def execute(state):
@@ -166,10 +179,15 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
                 value = ROLE_SCHEMAS[role].model_validate(raw).model_dump()
                 if role == "Listener":
                     scope = value.pop("scope")
+                    support = value.pop("request_support")
+                    if support != "unsupported":
+                        value["unsupported_reason"] = None
                     updates = value
                     # Only an explicit, schema-validated decision can end research
                     # for a closed corpus. Never infer scope from retrieval/errors.
-                    if scope == "out_of_scope" and not (mode == "live" and settings.general_web_enabled):
+                    if support == "unsupported":
+                        updates["status"] = "unsupported"
+                    elif scope == "out_of_scope" and not (mode == "live" and settings.general_web_enabled):
                         updates["status"] = "out_of_scope"
                 elif role == "Reporter":
                     # Final source-registry check is independent of model citation repair.
@@ -189,11 +207,15 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
                         note = "공식 공개 자료 조회 불가: " + ", ".join(documents) + ". 해당 자료는 근거에서 제외했으며 조회된 자료 범위로만 작성했습니다."
                         value["limitations"] = [note] + [s for s in value["limitations"] if s != note][:7]
                     updates = {"report":value}
+                    if current.get("web_budget_exhausted"):
+                        value["limitations"] = [web_failure_reason("budget")] + value["limitations"][:7]
                 elif role == "Evaluator":
                     updates = {"evaluation":value, "feedback":value["issues"] + value["follow_up"]}
                     previous_ids = set(current["revisions"][-1]["evidence_ids"]) if current["revisions"] else set()
                     ids = [e["id"] for e in current["evidence"]]
-                    if value["decision"] == "pass":
+                    if current.get("web_budget_exhausted"):
+                        updates["status"] = "budget_exhausted"
+                    elif value["decision"] == "pass":
                         updates["status"] = "success"
                     elif current["iteration"] >= settings.max_iterations:
                         updates["status"] = "limit_reached"
@@ -215,10 +237,10 @@ def build_graph(settings, mode, scenario, publish, *, persistent_client=None):
     builder = StateGraph(WorkflowState)
     for role in ("Listener", "Planner", "Researcher", "Reporter", "Evaluator"):
         builder.add_node(role, node(role))
-    builder.add_edge(START, "Listener")
-    builder.add_conditional_edges("Listener", lambda s: END if s["status"] == "out_of_scope" else "Planner")
+    builder.add_edge(START, entry)
+    builder.add_conditional_edges("Listener", lambda s: END if s["status"] in ("out_of_scope", "unsupported") else "Planner")
     builder.add_edge("Planner", "Researcher")
-    builder.add_conditional_edges("Researcher", lambda s: END if s["status"] == "empty" else "Reporter")
+    builder.add_conditional_edges("Researcher", lambda s: END if s["status"] in ("empty", "budget_exhausted") else "Reporter")
     builder.add_edge("Reporter", "Evaluator")
     builder.add_conditional_edges("Evaluator", lambda s: "Planner" if s["status"] == "running" else END)
-    return builder.compile()
+    return builder.compile(interrupt_after=["Listener"] if listener_only else None)

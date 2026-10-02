@@ -20,6 +20,8 @@ export function safeEvent(event: RunEvent) {
     d.tool_name || d.tool, d.input_summary,
     typeof d.count === 'number' ? `결과 ${d.count}건` : null,
     (d.state_fields || d.changed_fields)?.join(', '), d.reason,
+    d.web_category && ['budget','quota','auth','timeout','security','oversize','invalid_input','unavailable'].includes(d.web_category) ? `web_category=${d.web_category}` : null,
+    d.web_category === 'budget' && d.recoverable === true ? '기존 근거로 계속' : null,
     observation ? `served_by: ${served} · fallback: ${typeof observation.fallback === 'boolean' ? String(observation.fallback) : 'unknown'}` : null,
     d.role, typeof d.attempt === 'number' ? `시도 ${d.attempt}` : null,
     typeof d.duration_ms === 'number' ? `${d.duration_ms}ms` : null,

@@ -14,6 +14,8 @@ const statusText = {
   limit_reached: "반복 한도에 도달했습니다",
   empty: "관련 근거를 찾지 못했습니다",
   out_of_scope: "현재 자료 범위를 벗어난 질문입니다",
+  unsupported: "지원하지 않는 요청입니다",
+  budget_exhausted: "웹 조회 예산을 소진했습니다",
   error: "조사 중 오류가 발생했습니다",
   cancelled: "실행이 중단되었습니다",
 };
@@ -319,6 +321,7 @@ export default function App() {
             </p>
           )}
           {s && <p className="run-id small muted" style={{ overflowWrap: "anywhere" }}>실행 ID: {s.run_id}</p>}
+          {s?.run_context && <p className="small muted">실행 기준일 {s.run_context.current_date} · {s.run_context.timezone}</p>}
 <RunCost summary={s?.cost_summary} />
 <FocusRail key={s?.run_id ?? "idle"} snapshot={s} events={run.events} disconnected={run.disconnected} />
           <div
@@ -452,6 +455,9 @@ export default function App() {
               </div>
             )}
             <div hidden={view !== "report"}>
+            {s?.status === "budget_exhausted" && <div className="limit-banner">
+              실행별 웹 조회 예산 소진 · 조사 완전성을 보장하지 않습니다. 기존에 읽은 근거만 사용하며 남은 평가 이슈와 한계를 확인하세요.
+            </div>}
             {report ? (
               <div className="report-content">
                 <div className="report-kicker">
@@ -519,6 +525,10 @@ export default function App() {
                 <h3>
                   {s?.status === "out_of_scope"
                     ? "허용된 자료로 답할 수 있는 질문으로 바꿔 주세요"
+                    : s?.status === "unsupported"
+                    ? "사실 확인 중심의 리서치를 요청해 주세요"
+                    : s?.status === "budget_exhausted"
+                    ? "보고서를 작성할 근거가 부족합니다"
                     : s?.status === "empty"
                     ? "자료 범위를 바꿔 다시 질문해 보세요"
                     : s?.status === "error"
@@ -532,6 +542,10 @@ export default function App() {
                 <p>
                   {s?.status === "out_of_scope"
                     ? "일반 웹 검색이 꺼져 있어 현재 제공된 자료만 조사할 수 있습니다. 도구 오류나 검색 결과 없음과는 다릅니다."
+                    : s?.status === "unsupported"
+                    ? s.unsupported_reason ?? "이 요청은 리서치 지원 범위를 벗어납니다."
+                    : s?.status === "budget_exhausted"
+                    ? "검색 메타데이터는 인용 근거가 아닙니다. 근거 없는 보고서를 작성하지 않았습니다."
                     : active
                     ? "실행 단계와 작업 노트에서 실제 진행 상황을 확인할 수 있습니다."
                     : "질문을 입력하면 조사 계획부터 출처를 담은 보고서까지 이곳에 정리됩니다."}
