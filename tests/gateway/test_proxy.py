@@ -81,6 +81,20 @@ def completion(stack, model="research-primary", key=KEY):
                          json={"model": model, "messages": [{"role": "user", "content": "offline-private-prompt-marker"}]})
 
 
+def test_optional_header_contract(stack):
+    stack[3]("restart", "gateway")
+    wait_healthy(stack)
+    for scenario, model_name, fallbacks in [("normal", "openai/mock-primary", "0"), ("fail-503", "openai/mock-secondary", "1")]:
+        control(stack, scenario)
+        response = completion(stack)
+        assert response.status_code == 200
+        assert response.headers["x-litellm-model-name"] == model_name
+        assert response.headers["x-litellm-attempted-fallbacks"] == fallbacks
+        assert response.headers["x-ratelimit-remaining-requests"] == "29"
+    stack[3]("restart", "gateway")
+    wait_healthy(stack)
+
+
 def test_auth_and_aliases(stack):
     control(stack, "normal")
     assert completion(stack, key=None).status_code == 401
@@ -111,7 +125,7 @@ def test_fallback_actual_upstream_count(stack, code):
 
 def settings(stack, **kwargs):
     return Settings(provider="openai-compatible", model="research-primary", api_key=KEY,
-                    base_url=stack[1] + "/v1", gateway_observation=True, **kwargs)
+                    base_url=stack[1] + "/v1", gateway_observation=True, gateway_model_names={"research-primary": "openai/mock-primary", "research-secondary": "openai/mock-secondary"}, **kwargs)
 
 
 @pytest.mark.parametrize("fallback", [False, True])
@@ -119,7 +133,7 @@ async def test_real_graph_mcp_and_safe_usage(stack, caplog, monkeypatch, fallbac
     monkeypatch.setenv("RESEARCH_PUBLIC_SOURCES", "0")
     control(stack, "fail-503" if fallback else "normal")
     caplog.set_level(logging.INFO, logger="research.model")
-    manager = RunManager(settings(stack))
+    manager = RunManager(settings(stack, token_prices={"research-primary": {"input": 2, "output": 4}, "research-secondary": {"input": 3, "output": 6}}))
     state = await manager.start(RunRequest(question="revenue", mode="live"))
     await manager.tasks[state["run_id"]]
     final = manager.snapshot(state["run_id"])
@@ -138,7 +152,14 @@ async def test_real_graph_mcp_and_safe_usage(stack, caplog, monkeypatch, fallbac
     assert all(e["observation"]["served_by"] == records[0]["served_by"] and e["observation"]["fallback"] is fallback for e in completes)
     assert len({r["gateway_call_id"] for r in records}) == 7
     assert all(r["total_tokens"] == 18 and r["input_tokens"] == 11 and r["output_tokens"] == 7 for r in records)
-    assert all(r["estimated_cost_usd"] is None for r in records)
+    expected_cost = (11 * (3 if fallback else 2) + 7 * (6 if fallback else 4)) / 1_000_000
+    assert all(r["estimated_cost_usd"] == expected_cost for r in records)
+    assert all(r["gateway_model_name"] == ("openai/mock-secondary" if fallback else "openai/mock-primary") and r["attempted_fallbacks"] == int(fallback) for r in records)
+    assert all(type(r["rate_limit_remaining_requests"]) is int for r in records)
+    assert all(e["observation"]["gateway_model_name"] == records[0]["gateway_model_name"] for e in completes)
+    assert final["cost_summary"]["estimated_cost_usd"] == pytest.approx(7 * expected_cost)
+    assert final["cost_summary"]["model_requests"] == final["cost_summary"]["priced_requests"] == 7
+    assert final["cost_summary"]["unknown_requests"] == 0
     assert KEY not in caplog.text
 
 

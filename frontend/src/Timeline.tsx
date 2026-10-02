@@ -1,4 +1,5 @@
 import type { RunEvent } from './types';
+import { estimatedUsd } from './RunCost';
 const labels: Record<string, string> = {
   node_start: '단계 시작', node_complete: '단계 완료', tool_start: '도구 호출',
   tool_complete: '도구 완료', tool_error: '도구 오류', evaluation: '결과 평가',
@@ -24,6 +25,18 @@ export function safeEvent(event: RunEvent) {
     typeof d.duration_ms === 'number' ? `${d.duration_ms}ms` : null,
     d.decision, d.retrieval_status === 'unavailable' ? '자료 이용 불가 · 인용 제외' : null,
   ].filter(Boolean).join(' · ');
+}
+function ModelMetrics({observation: o}: {observation: NonNullable<RunEvent['data']['observation']>}) {
+  const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? String(v) : 'unknown';
+  const latency = typeof o.latency_ms === 'number' && Number.isFinite(o.latency_ms) && o.latency_ms >= 0 ? `${o.latency_ms} ms` : 'unknown';
+  const name = typeof o.gateway_model_name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(o.gateway_model_name) && !o.gateway_model_name.includes('://') ? o.gateway_model_name : 'unknown';
+  return <div className="model-metrics">
+    <span className={`fallback-badge ${o.fallback === true ? 'used' : ''}`}>{o.fallback === true ? 'fallback 발생' : o.fallback === false ? 'fallback 없음' : 'fallback 미확인'}</span>
+    <p>served model: {name} · 지연 {latency}</p>
+    <p>입력 {count(o.input_tokens)} · 출력 {count(o.output_tokens)} · 전체 {count(o.total_tokens)}</p>
+    <p>reasoning {count(o.reasoning_tokens)} · 미설명 차액 {typeof o.unexplained_token_residual === 'number' && Number.isSafeInteger(o.unexplained_token_residual) ? String(o.unexplained_token_residual) : 'unknown'} · 추정 {estimatedUsd(o.estimated_cost_usd)}</p>
+    <p>fallback 시도 {count(o.attempted_fallbacks)} · 남은 요청 {count(o.rate_limit_remaining_requests)} (응답 헤더 · 계정 잔액 아님)</p>
+  </div>;
 }
 const groupLabel = (e: RunEvent) => `${e.data.snapshot.iteration}차 · ${e.data.snapshot.stage ?? '실행'}`;
 const sameCall = (a: RunEvent, b: RunEvent) => !!a.data.tool_call_id &&
@@ -53,6 +66,7 @@ export function Timeline({ events, complete, lastSeq }: { events: RunEvent[]; co
             return <li key={e.seq} data-testid="timeline-event" data-seq={e.seq} className={`timeline-event ${['tool_error','model_error','validation_error'].includes(e.type) ? 'event-error' : ''}`}>
               <div className="event-stamp"><span>#{e.seq}</span><time dateTime={e.timestamp}>{Number.isFinite(Date.parse(e.timestamp)) ? new Date(e.timestamp).toLocaleTimeString('ko-KR', {hour12:false}) : '시간 미확인'}</time></div>
               <p>{safeEvent(e)}</p>
+              {e.type === 'model_complete' && e.data.observation && <ModelMetrics observation={e.data.observation}/>}
               {start && Number.isFinite(seconds) && seconds >= 0 && <small>호출 #{start.seq} · {seconds}초</small>}
               {e.type === 'tool_start' && !resolved && <small>{complete ? '응답 미확인 · 실행 종료' : '응답 대기'}</small>}
               {(e.data.tool_call_id || e.data.model_call_id || e.data.input_summary) && <details><summary>공개 메타데이터</summary>

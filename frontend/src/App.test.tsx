@@ -55,6 +55,27 @@ async function start() {
   return Stream.instances[0];
 }
 describe("workbench", () => {
+  it.each(["stream", "restore", "reconnect"])("keeps authoritative run costs without summing replayed events via %s", async (delivery) => {
+    const final=snapshot({mode:'live',status:'success',last_seq:200,finished_at:'2026-01-01T00:00:12Z',
+      cost_summary:{model_requests:3,priced_requests:2,unknown_requests:1,known_estimated_cost_usd:0.125,estimated_cost_usd:null,estimate_status:'partial'}});
+    if(delivery==='restore') {
+      sessionStorage.setItem('research-studio.run-id','run-1');
+      vi.mocked(fetch).mockImplementation(async url=>({ok:true,json:async()=>url==='/api/config'?config:final} as Response));
+      render(<App/>);
+    } else {
+      const stream=await start();
+      if(delivery==='stream') {
+        act(()=>stream.emit(final,'terminal'));
+        act(()=>stream.emit(final,'terminal'));
+      } else {
+        vi.mocked(fetch).mockResolvedValueOnce({ok:true,json:async()=>final} as Response);
+        act(()=>stream.onerror?.());
+      }
+    }
+    expect(await screen.findByText('실행 추정 비용: unknown',{}, {timeout:3500})).toBeVisible();
+    expect(screen.getByText(/알려진 소계 \$0.125/)).toBeVisible();
+    expect(screen.getByText(/미확인 1\/3 요청/)).toBeVisible();
+  });
   it.each(["stream", "restore", "reconnect"])("shows out-of-scope separately from errors via %s", async (delivery) => {
     const final = snapshot({ status: "out_of_scope", stage: "Listener", iteration: 0,
       last_seq: 8, finished_at: "2026-01-01T00:00:12Z", errors: [],

@@ -45,7 +45,7 @@ def test_events_terminal_and_snapshot_recovery():
         recovered = c.get(f"/api/runs/{rid}/events?after={events[-2]['seq']}")
         assert '"type":"terminal"' in recovered.text
         assert c.get(f"/api/runs/{rid}/events?after={snapshot['last_seq']}").text == ""
-        assert set(snapshot) == {"run_id","question","mode","status","stage","iteration","started_at","finished_at","last_seq","interpreted_request","plan","evidence","report","revisions","evaluation","feedback","errors","partial_result","unavailable_sources"}
+        assert set(snapshot) == {"run_id","question","mode","status","stage","iteration","started_at","finished_at","last_seq","interpreted_request","plan","evidence","report","revisions","evaluation","feedback","errors","partial_result","unavailable_sources","cost_summary"}
         assert snapshot["partial_result"] is None
 
 @pytest.mark.asyncio

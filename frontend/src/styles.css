@@ -81,6 +81,10 @@ select { max-width: 100%; border: 1px solid var(--border); border-radius: 5px; b
 .event-group ol { list-style: none; padding: 0; margin: 0; }
 .timeline-event { border-bottom: 1px solid #edf1f6; padding: 10px 0; overflow-wrap: anywhere; animation: event-enter .35s ease-out; }
 .timeline-event:last-child { border-bottom: 0; }
+.model-metrics { margin: 8px 0; font-variant-numeric: tabular-nums; color: #44536a; }
+.fallback-badge { display: inline-block; border: 1px solid #cdd5df; border-radius: 4px; padding: 2px 6px; font-size: 11px; color: #44536a; background: #f6f8fa; }
+.fallback-badge.used { background: #fff5e8; border-color: #cfad77; color: #704b10; }
+.run-cost { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .timeline-event p { margin: 3px 0; font-size: 12px; }
 .timeline-event small,.timeline-event summary { font-size: 11px; color: #536785; }
 .timeline-event details { margin-top: 5px; }

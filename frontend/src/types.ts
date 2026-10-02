@@ -49,7 +49,13 @@ export interface Revision {
   added_evidence_ids: string[];
   evaluation: Evaluation;
 }
+export interface CostSummary {
+  model_requests: number; priced_requests: number; unknown_requests: number;
+  known_estimated_cost_usd: number | null; estimated_cost_usd: number | null;
+  estimate_status: "unknown" | "partial" | "complete";
+}
 export interface Snapshot {
+  cost_summary?: CostSummary | null;
   run_id: string;
   question: string;
   mode: "test" | "live";
@@ -90,6 +96,13 @@ export interface RunEvent {
     observation?: {
       served_by?: "research-primary" | "research-secondary" | null;
       fallback?: boolean | null;
+      gateway_model_name?: string | null;
+      attempted_fallbacks?: number | null;
+      rate_limit_remaining_requests?: number | null;
+      latency_ms?: number | null;
+      input_tokens?: number | null; output_tokens?: number | null; total_tokens?: number | null;
+      reasoning_tokens?: number | null; unexplained_token_residual?: number | null;
+      estimated_cost_usd?: number | null;
     };
     purpose?: "planner_context" | "research_execution";
     tool_count?: number;

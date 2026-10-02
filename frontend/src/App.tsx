@@ -5,6 +5,7 @@ import { useRun } from "./useRun";
 import { useContentFloor } from "./useContentFloor";
 import type { Config, Report } from "./types";
 import { Timeline } from "./Timeline";
+import { RunCost } from "./RunCost";
 import { FocusRail, stages } from "./FocusRail";
 const statusText = {
   queued: "실행 대기 중",
@@ -318,6 +319,7 @@ export default function App() {
             </p>
           )}
           {s && <p className="run-id small muted" style={{ overflowWrap: "anywhere" }}>실행 ID: {s.run_id}</p>}
+<RunCost summary={s?.cost_summary} />
 <FocusRail key={s?.run_id ?? "idle"} snapshot={s} events={run.events} disconnected={run.disconnected} />
           <div
             className={`return-path ${s?.evaluation?.decision === "revise" || s?.feedback.length ? "revising" : ""}`}

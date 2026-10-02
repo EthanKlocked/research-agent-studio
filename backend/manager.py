@@ -1,6 +1,7 @@
 """Bounded process-local run snapshots and replay logs; not durable persistence."""
 import asyncio
 import logging
+import math
 from backend.errors import error_category, safe_exception_classes, safe_web_category
 from backend.schemas import ROLE_SCHEMAS
 from collections import OrderedDict, deque
@@ -30,6 +31,36 @@ class RunRecord:
     cancel_requested: bool = False
     finalized: bool = False
     validated_state: dict | None = None
+    # Per model-call ID, separate from bounded/replayed events: (completed, estimate).
+    model_costs: dict = field(default_factory=dict)
+
+    def observe_cost(self, kind, data):
+        call = (data or {}).get("model_call_id")
+        if not isinstance(call, str) or len(call) != 32 or any(c not in "0123456789abcdef" for c in call):
+            return
+        if kind == "model_start":
+            self.model_costs.setdefault(call, (False, None))
+        elif kind == "model_complete" and not self.model_costs.get(call, (False, None))[0]:
+            value = ((data or {}).get("observation") or {}).get("estimated_cost_usd")
+            try:
+                valid = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+            except OverflowError:
+                valid = False
+            self.model_costs[call] = (True, value if valid else None)
+
+    def cost_summary(self):
+        known = [value for _, value in self.model_costs.values() if value is not None]
+        try:
+            subtotal = math.fsum(known) if known else None
+            if subtotal is not None and not math.isfinite(subtotal):
+                subtotal = None
+        except OverflowError:
+            subtotal = None
+        unknown = len(self.model_costs) - len(known)
+        return {"model_requests": len(self.model_costs), "priced_requests": len(known),
+                "unknown_requests": unknown, "known_estimated_cost_usd": subtotal,
+                "estimated_cost_usd": subtotal if unknown == 0 else None,
+                "estimate_status": "unknown" if subtotal is None else "partial" if unknown else "complete"}
 
 def safe_error(exc):
     category = error_category(exc)
@@ -58,9 +89,12 @@ class RunManager:
             record.finalized = True
         if kind == "node_complete" and state.get("stage") == "Evaluator":
             record.validated_state = deepcopy(state)
+        if record.state.get("mode") == "live":
+            record.observe_cost(kind, data)
         seq = record.state["last_seq"] + 1
         record.state = deepcopy(state)
         record.state["last_seq"] = seq
+        record.state["cost_summary"] = record.cost_summary() if record.state.get("mode") == "live" else None
         event = {"seq":seq, "run_id":run_id, "type":kind, "timestamp":now(), "data":{**(data or {}), "snapshot":deepcopy(record.state)}}
         record.events.append(event)
         record.changed.set()
@@ -81,7 +115,7 @@ class RunManager:
             self.runs.pop(old)
             self.tasks.pop(old)
         run_id = uuid4().hex
-        state = dict(run_id=run_id, question=request.question, mode=request.mode, status="queued", stage=None, iteration=0, started_at=now(), finished_at=None, last_seq=0, interpreted_request="", plan=[], evidence=[], unavailable_sources=[], report=None, revisions=[], evaluation=None, feedback=[], errors=[], partial_result=None)
+        state = dict(run_id=run_id, question=request.question, mode=request.mode, status="queued", stage=None, iteration=0, started_at=now(), finished_at=None, last_seq=0, interpreted_request="", plan=[], evidence=[], unavailable_sources=[], report=None, revisions=[], evaluation=None, feedback=[], errors=[], partial_result=None, cost_summary=None)
         self.runs[run_id] = RunRecord(state, deque(maxlen=self.settings.max_events))
         self.tasks[run_id] = asyncio.create_task(self.execute(run_id, request))
         return self.snapshot(run_id)

@@ -5,6 +5,22 @@ import { snapshot } from './test/fixtures';
 import type { RunEvent } from './types';
 const event = (seq: number, type: string, data: Record<string, unknown> = {}): RunEvent => ({seq, type, run_id: 'run-1', timestamp: `2026-01-01T00:00:0${seq}Z`, data: { snapshot: snapshot({ last_seq: seq, stage: 'Researcher' }), ...data }});
 describe('observable timeline', () => {
+  it('shows safe served model, fallback badge, latency and token metrics', () => {
+    render(<Timeline events={[event(1,'model_complete',{observation:{served_by:'research-secondary',gateway_model_name:'openai/mock-secondary',fallback:true,latency_ms:120.5,input_tokens:11,output_tokens:7,total_tokens:18,reasoning_tokens:3,unexplained_token_residual:0,estimated_cost_usd:0.00005,attempted_fallbacks:1,rate_limit_remaining_requests:29}})]} complete lastSeq={1}/>);
+    expect(screen.getByText('fallback 발생')).toBeVisible();
+    expect(screen.getByText(/served model: openai\/mock-secondary/)).toBeVisible();
+    expect(screen.getByText(/지연 120.5 ms/)).toBeVisible();
+    expect(screen.getByText(/입력 11 · 출력 7 · 전체 18/)).toBeVisible();
+    expect(screen.getByText(/reasoning 3 · 미설명 차액 0/)).toBeVisible();
+    expect(screen.getByText(/추정 \$0.00005/)).toBeVisible();
+  });
+  it('never renders missing tokens or latency as zero', () => {
+    render(<Timeline events={[event(1,'model_complete',{observation:{served_by:null,fallback:null}})]} complete lastSeq={1}/>);
+    expect(screen.getByText(/지연 unknown/)).toBeVisible();
+    expect(screen.getByText(/입력 unknown · 출력 unknown · 전체 unknown/)).toBeVisible();
+    expect(screen.getByText(/served model: unknown/)).toBeVisible();
+    expect(screen.queryByText(/추정 \$0/)).not.toBeInTheDocument();
+  });
   it.each([
     [{served_by:'research-secondary',fallback:true}, 'served_by: research-secondary · fallback: true'],
     [{served_by:'research-primary',fallback:false}, 'served_by: research-primary · fallback: false'],

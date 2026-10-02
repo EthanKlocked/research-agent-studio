@@ -60,6 +60,7 @@ def test_explicit_reasoning_is_not_inferred_from_residual(caplog, usage, reasoni
     ("02" * 32, {"total_tokens": 150}, {"input": 2, "output": 4}, None),
     ("02" * 32, {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 170}, {"input": 2, "output": 4}, None),
     ("02" * 32, {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}, None, None),
+    ("02" * 32, {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}, {"input": 1e308, "output": 1e308}, None),
 ])
 def test_estimate_uses_served_price_without_double_counting(caplog, deployment, usage, price, expected):
     prices = {"research-primary": {"input": 999, "output": 999}}
@@ -70,7 +71,7 @@ def test_estimate_uses_served_price_without_double_counting(caplog, deployment, 
     assert data["billing_cost_usd"] is None
 
 
-@pytest.mark.parametrize("prices", [[], {"private/model": {"input": 1, "output": 2}}, {"research-primary": {"input": -1, "output": 2}}, {"research-primary": {"input": True, "output": 2}}, {"research-primary": {"input": float("inf"), "output": 2}}, {"research-primary": {"input": 1}}, {"research-primary": {"input": "1", "output": 2}}])
+@pytest.mark.parametrize("prices", [[], {"private/model": {"input": 1, "output": 2}}, {"research-primary": {"input": -1, "output": 2}}, {"research-primary": {"input": True, "output": 2}}, {"research-primary": {"input": float("inf"), "output": 2}}, {"research-primary": {"input": 1}}, {"research-primary": {"input": "1", "output": 2}}, {"research-primary": {"input": 10 ** 400, "output": 2}}])
 def test_invalid_prices_fail_closed(prices):
     with pytest.raises(ValueError, match="LLM_TOKEN_PRICES_JSON"):
         Settings(token_prices=prices)
@@ -80,12 +81,35 @@ def test_settings_read_only_explicit_price_config(monkeypatch):
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     monkeypatch.setenv("LLM_GATEWAY_OBSERVATION", "1")
     monkeypatch.setenv("LLM_TOKEN_PRICES_JSON", '{"research-secondary":{"input":2,"output":4}}')
+    monkeypatch.setenv("LLM_GATEWAY_MODEL_NAMES_JSON", '{"research-secondary":"openai/mock-secondary"}')
     settings = Settings.from_env()
+    assert settings.gateway_model_names == {"research-secondary": "openai/mock-secondary"}
     assert settings.gateway_observation
     assert settings.token_prices == {"research-secondary": {"input": 2, "output": 4}}
     monkeypatch.setenv("LLM_TOKEN_PRICES_JSON", "not-json")
     with pytest.raises(ValueError, match="LLM_TOKEN_PRICES_JSON"):
         Settings.from_env()
+
+
+@pytest.mark.parametrize("headers,expected", [
+    ({"x-litellm-model-name": "openai/mock-secondary", "x-litellm-attempted-fallbacks": "1", "x-ratelimit-remaining-requests": "29"}, ("openai/mock-secondary", 1, 29)),
+    ({"x-litellm-model-name": "private/secret", "x-litellm-attempted-fallbacks": "-1", "x-ratelimit-remaining-requests": "1.5"}, (None, None, None)),
+    ({"x-litellm-model-name": "openai/mock-primary", "x-litellm-attempted-fallbacks": "0", "x-ratelimit-remaining-requests": "0"}, (None, 0, 0)),
+    ({"x-litellm-attempted-fallbacks": "9" * 500, "x-ratelimit-remaining-requests": True}, (None, None, None)),
+    ({}, (None, None, None)),
+])
+def test_optional_headers_are_explicit_bounded_and_model_name_optin(caplog, headers, expected):
+    settings = Settings(gateway_observation=True, gateway_model_names={"research-secondary": "openai/mock-secondary"})
+    response = SimpleNamespace(result=[SimpleNamespace(response_metadata={"headers": {"x-litellm-model-id": "02" * 32, **headers}})])
+    data = record_model_call(run_id=None, role="Listener", call_id="a" * 32, model="research-primary", started=monotonic(), status="success", response=response, settings=settings)
+    assert (data["gateway_model_name"], data["attempted_fallbacks"], data["rate_limit_remaining_requests"]) == expected
+    assert "private/secret" not in caplog.text
+
+
+@pytest.mark.parametrize("names", [[], {"bad": "openai/name"}, {"research-primary": "https://secret.invalid?key=secret"}, {"research-primary": "private name"}, {"research-primary": "a" * 129}])
+def test_model_name_allowlist_rejects_unbounded_or_non_model_values(names):
+    with pytest.raises(ValueError, match="LLM_GATEWAY_MODEL_NAMES_JSON"):
+        Settings(gateway_model_names=names)
 
 
 def test_gateway_timeout_profile_covers_two_attempts_and_repair():

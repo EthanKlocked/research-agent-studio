@@ -88,7 +88,7 @@ async def test_repair_progress_tracks_actual_calls_not_scheduled_work(monkeypatc
     assert all(set(o) == {'run_id', 'role', 'model_call_id', 'model', 'gateway_call_id', 'gateway_model_id',
                            'served_by', 'fallback', 'status', 'latency_ms', 'input_tokens', 'output_tokens',
                            'total_tokens', 'reasoning_tokens', 'unexplained_token_residual', 'usage_source',
-                           'estimated_cost_usd', 'billing_cost_usd'} for o in observations)
+                           'estimated_cost_usd', 'billing_cost_usd', 'gateway_model_name', 'attempted_fallbacks', 'rate_limit_remaining_requests'} for o in observations)
 
 
 async def test_provider_failure_has_no_completion_validation_or_repair(monkeypatch):
