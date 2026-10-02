@@ -1,0 +1,25 @@
+name: research-gateway
+services:
+  gateway:
+    image: ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd
+    ports: ["127.0.0.1:4000:4000"]
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000", "--num_workers", "1"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set the local gateway key}
+      PRIMARY_MODEL: ${PRIMARY_MODEL:?Set openai/model-name}
+      PRIMARY_BASE_URL: ${PRIMARY_BASE_URL:?Set the primary upstream base URL}
+      PRIMARY_API_KEY: ${PRIMARY_API_KEY:?Set the primary upstream key}
+      SECONDARY_MODEL: ${SECONDARY_MODEL:?Set openai/model-name}
+      SECONDARY_BASE_URL: ${SECONDARY_BASE_URL:?Set the secondary upstream base URL}
+      SECONDARY_API_KEY: ${SECONDARY_API_KEY:?Set the secondary upstream key}
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      LITELLM_LOG: "ERROR"
+      LITELLM_TELEMETRY: "False"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+    restart: "no"

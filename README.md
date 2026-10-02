@@ -6,7 +6,7 @@
 
 ## 빠른 시작
 
-요구 환경: Python 3.12, Node.js 22, npm, uv. 최초 설치에는 패키지 레지스트리 네트워크 접근이 필요합니다. Docker·외부 데이터베이스·별도 MCP 설치는 필요 없습니다.
+요구 환경: Python 3.12, Node.js 22, npm, uv. 최초 설치에는 패키지 레지스트리 네트워크 접근이 필요합니다. Docker·외부 데이터베이스·별도 MCP 설치는 기본 실행에 필요 없습니다. 선택형 LiteLLM gateway 검증/실행에는 Docker Desktop과 Compose v2가 추가로 필요합니다.
 
 먼저 저장소를 clone하고 해당 디렉터리로 이동합니다.
 
@@ -109,6 +109,12 @@ curl --fail-with-body -sS http://127.0.0.1:8765/api/runs \
 5. 실패 경로를 확인하려면 **운영자가 로컬 설정에 잘못된 테스트용 인증값을 직접 사용**하고 오류 종료 및 비밀값 미노출을 확인한 뒤 정상 설정으로 되돌립니다. 실서비스 키를 폐기하거나 변경할 필요는 없습니다. 재조사·한도·도구 오류를 결정적으로 확인하려면 별도 테스트 모드를 이용합니다.
 
 **실제 provider 인증, 선택한 모델의 tool calling/JSON 호환성, 보고서 품질·의미상 사실성, provider 측 취소 효과는 사용자 설정 후 확인 필요합니다. 이 저장소의 키 없는 테스트는 이를 검증하지 않습니다.**
+
+## 선택: LiteLLM Gateway
+
+기존 직접 연결·오프라인 fixture를 유지하면서 **Agent → localhost LiteLLM Proxy → 두 OpenAI-compatible upstream** 경로를 선택할 수 있습니다. 앱과 MCP는 호스트에서 계속 실행하고, `gateway/`의 고정 이미지 Proxy만 Docker Compose로 실행합니다. `research-primary` / `research-secondary` 별칭, 한 번의 fallback, gateway 인증과 deployment별 실제 RPM 제한을 구성합니다. 전 역할은 같은 설정 별칭을 쓰며 MCP 도구는 Proxy를 거치지 않습니다.
+
+[Windows/macOS 설치·키 없는 mock 검증·선택적 실제 연결·종료 및 학습 가이드](docs/gateway.md)를 먼저 읽으세요. 키 없는 통합 테스트는 **실제 LiteLLM + 로컬 mock upstream + 기존 graph/Agent/MCP**를 사용하며 live 모델의 품질·과금·Windows 실행을 검증하지 않습니다. 요청 상관관계·지연·응답 token usage는 안전한 앱 로그로 기록하고, 모르는 usage/가격은 `null`입니다. DB/Redis/유료 라이선스는 필수가 아니며 영속 예산/분산 운영은 포함하지 않습니다.
 
 ## 선택: Exa 일반 웹 검색
 
