@@ -111,7 +111,8 @@ async def test_unsupported_general_enabled_api_snapshot_and_replay(monkeypatch):
         assert state['status']=='unsupported' and state['finished_at']
         assert '"unsupported"' in events and '"terminal"' in events
         assert '"tool_start"' not in events and '"discovery_start"' not in events
-        assert state['run_context']['timezone']=='UTC'
+        from datetime import datetime
+        assert state['run_context']['timezone'] == datetime.now().astimezone().tzname()
     assert len(requests)==1 and all(c.is_closed for c in clients)
     assert all(p.returncode is not None for p in processes)
 

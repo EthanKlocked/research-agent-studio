@@ -21,6 +21,7 @@ def create_app(settings=None, frontend_dir=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        settings.warn_gateway_timeouts()
         yield
         await manager.close()
 
@@ -77,9 +78,14 @@ def create_app(settings=None, frontend_dir=None):
             raise HTTPException(404, "실행 기록이 없습니다. 서버 재시작 또는 보관 한도에 의해 삭제될 수 있습니다.")
 
     @app.get("/api/runs/{run_id}")
-    async def snapshot(run_id: str):
+    async def snapshot(run_id: str, include_events: bool = False):
         exists(run_id)
-        return manager.snapshot(run_id)
+        result = manager.snapshot(run_id)
+        if include_events:
+            # No await between snapshot and history: one event-loop-consistent cut.
+            # Existing bounded log only; never place history inside event snapshots.
+            result["retained_events"] = list(manager.runs[run_id].events)
+        return result
 
     @app.post("/api/runs/{run_id}/cancel")
     async def cancel(run_id: str):

@@ -1,4 +1,15 @@
-import type { Snapshot, Status } from "./types";
+import type { RunEvent, Snapshot, Status } from "./types";
+// Stable server sequence IDs, not model-call IDs (start/complete are distinct).
+// History is bounded and never used to recompute the authoritative cost summary.
+export function mergeEvents(old: RunEvent[], incoming: RunEvent[], snapshot: Snapshot): RunEvent[] {
+  const bySeq = new Map<number, RunEvent>();
+  for (const e of [...old, ...incoming]) {
+    if (e.run_id === snapshot.run_id && Number.isSafeInteger(e.seq) && e.seq > 0 &&
+        e.seq <= snapshot.last_seq && e.data?.snapshot?.run_id === snapshot.run_id &&
+        e.data.snapshot.last_seq === e.seq && !bySeq.has(e.seq)) bySeq.set(e.seq, e);
+  }
+  return [...bySeq.values()].sort((a,b)=>a.seq-b.seq).slice(-150);
+}
 export function acceptSnapshot(
   current: Snapshot | null,
   next: Snapshot,

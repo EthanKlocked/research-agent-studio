@@ -55,6 +55,43 @@ async function start() {
   return Stream.instances[0];
 }
 describe("workbench", () => {
+  it("deduplicates restored history against stale and new SSE delivery", async () => {
+    const s=snapshot({last_seq:7});
+    const event={run_id:s.run_id,seq:7,type:"model_complete",timestamp:s.started_at,data:{snapshot:s,observation:{served_by:"research-secondary" as const,fallback:true}}};
+    sessionStorage.setItem("research-studio.run-id",s.run_id);
+    vi.mocked(fetch).mockImplementation(async url=>({ok:true,json:async()=>url==="/api/config"?config:{...s,retained_events:[event]}} as Response));
+    render(<App/>);
+    await waitFor(()=>expect(Stream.instances).toHaveLength(1));
+    expect(Stream.instances[0].url).toContain("after=7");
+    fireEvent.click(screen.getByText("작업 상세"));
+    act(()=>Stream.instances[0].onmessage?.({data:JSON.stringify(event)}));
+    act(()=>Stream.instances[0].emit({...s,last_seq:8},"model_start"));
+    act(()=>Stream.instances[0].onmessage?.({data:JSON.stringify(event)}));
+    expect(screen.getAllByTestId("timeline-event").map(e=>e.dataset.seq)).toEqual(["7","8"]);
+  });
+  it.each(["restore", "reconnect"])("restores retained model observations without duplicate costs via %s", async delivery => {
+    const s = snapshot({last_seq:8, status:"success",finished_at:"2026-01-01T00:00:08Z", cost_summary:{model_requests:1,priced_requests:1,unknown_requests:0,known_estimated_cost_usd:0.00048,estimated_cost_usd:0.00048,estimate_status:"complete",residual_priced_requests:1}});
+    const event = {run_id:s.run_id,seq:7,type:"model_complete",timestamp:s.started_at,data:{snapshot:{...s,last_seq:7},role:"Researcher" as const,model_call_id:"a".repeat(32),observation:{served_by:"research-secondary" as const,fallback:true,gateway_model_name:"openai/mock-secondary",input_tokens:100,output_tokens:50,total_tokens:170,latency_ms:123,estimated_cost_usd:0.00048,input_output_estimated_cost_usd:0.0004,cost_assumption:"residual_at_output_rate" as const}}};
+    const restored={...s,retained_events:[event,event]};
+    if(delivery === "restore") {
+      sessionStorage.setItem("research-studio.run-id",s.run_id);
+      vi.mocked(fetch).mockImplementation(async url=>({ok:true,json:async()=>url==="/api/config"?config:restored} as Response));
+      render(<App/>);
+      await screen.findByText("조사가 완료되었습니다");
+      fireEvent.click(screen.getByText("작업 상세"));
+    } else {
+      const stream=await start();
+      vi.mocked(fetch).mockResolvedValueOnce({ok:true,json:async()=>restored} as Response);
+      act(()=>stream.onerror?.());
+    }
+    expect(await screen.findByText(/served model: openai\/mock-secondary/,{}, {timeout:3500})).toBeVisible();
+    expect(screen.getAllByTestId("timeline-event")).toHaveLength(1);
+    expect(screen.getByText(/입력 100 · 출력 50 · 전체 170/)).toBeVisible();
+    expect(screen.getByText(/입력·출력 소계.*차액 제외/)).toBeVisible();
+    expect(screen.getByText(/차액을 출력 단가로 가정한 요청 1건/)).toBeVisible();
+    expect(screen.getByText(/일부 이벤트 기록이 없습니다/)).toBeVisible();
+  });
+
   it.each(["stream", "restore", "reconnect"])("shows unsupported and budget outcomes honestly via %s", async (delivery) => {
     const final = snapshot({status:"unsupported", stage:"Listener", iteration:0, last_seq:8,
       finished_at:"2026-10-02T00:01:12Z", errors:[], unsupported_reason:"개인 맞춤 종목 추천 대신 공시 비교를 요청해 주세요.",
@@ -501,7 +538,7 @@ describe("workbench", () => {
     sessionStorage.setItem("research-studio.run-id", "run-1");
     render(<App />);
     await waitFor(() => expect(Stream.instances.length).toBe(1));
-    expect(fetch).toHaveBeenCalledWith("/api/runs/run-1", expect.anything());
+    expect(fetch).toHaveBeenCalledWith("/api/runs/run-1?include_events=true", expect.anything());
     expect(Stream.instances[0].url).toContain("after=1");
     expect(sessionStorage.length).toBe(1);
   });

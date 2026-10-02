@@ -150,7 +150,7 @@ docker compose --env-file gateway/.env -f gateway/compose.yaml down
 - `input_tokens`, `output_tokens`, `total_tokens`: 응답이 보고한 사용량입니다. Proxy가 usage 누락을 0으로 합성하는 경우를 고려하여 **total이 없거나 0이면 모두 unknown (`null`)**으로 기록합니다. 따라서 실제 0-token 응답도 보수적으로 unknown입니다. provider가 추정한 양의 토큰까지 실제 측정인지 판별하지는 못합니다.
 - `reasoning_tokens`: 응답 `usage.completion_tokens_details.reasoning_tokens`에 명시된 비음수 정수만 기록합니다. 숫자가 없으면 `null`, 차액에서 추측하지 않습니다. total이 누락돼도 이 명시적 detail은 독립적으로 보존합니다. 다른 제공자 전용 필드를 임의로 reasoning으로 해석하지 않습니다.
 - `unexplained_token_residual`: 알려진 `total - input - output`입니다. 음수도 데이터 불일치로 보존합니다. 필요한 수치가 없으면 `null`. **reasoning과 별도**이며 reasoning 수치를 residual에서 빼거나 total에 더하지 않습니다.
-- `estimated_cost_usd`: 명시적으로 등록한 단가 × 최종 응답 input/output의 단순 추정치. 아래 가격 설정이 없거나 served 별칭/필수 사용량이 불명확하거나 residual이 0이 아니면 `null`입니다. `billing_cost_usd`는 항상 `null`입니다. 실제 청구서를 조회하지 않으며 Proxy 비용 header를 청구액으로 쓰지 않습니다.
+- `estimated_cost_usd`: 명시적으로 등록한 단가 × 최종 응답 input/output의 단순 추정치. 아래 가격 설정이 없거나 served 별칭/필수 사용량이 불명확하면 `null`입니다. residual이 0이 아니면 기본은 `null`이며, 양수 차액만 명시적 `LLM_RESIDUAL_PRICING=output` 가정으로 계산할 수 있습니다. `billing_cost_usd`는 항상 `null`입니다. 실제 청구서를 조회하지 않으며 Proxy 비용 header를 청구액으로 쓰지 않습니다.
 
 공개 underlying 이름 표시가 필요하면 호스트 `.env`에 별칭별 **실제로 설정한 공개 모델명**을 명시하세요. 아래는 mock 예시일 뿐 실제 모델명이 아닙니다. gateway의 `PRIMARY_MODEL`/`SECONDARY_MODEL` 문자열과 정확히 맞아야 합니다:
 
@@ -159,6 +159,10 @@ LLM_GATEWAY_MODEL_NAMES_JSON={"research-primary":"openai/mock-primary","research
 ```
 
 기본 `{}`이면 served 별칭/fallback은 여전히 표시하되 underlying model 이름만 unknown입니다. 사용자 전용 deployment 이름에 민감한 정보가 있으면 등록하지 마세요. 임의 proxy가 보낸 이름을 자동으로 신뢰·공개하지 않기 위한 별도 opt-in입니다.
+
+### 시작 시 timeout 경고
+
+`LLM_GATEWAY_OBSERVATION=1`이지만 `LLM_GATEWAY_ROUTER_TIMEOUT`을 선언하지 않으면 앱은 router 예산 미확인 경고를 출력합니다. 번들 프로필은125s를 명시합니다. 임의 proxy의 예산을125s로 추정하지 않습니다. 명시한 router timeout보다 `LLM_REQUEST_TIMEOUT`이 작거나 같으면 요청이 fallback 완료 전에 끊길 수 있다는 경고가 나옵니다. role deadline이 request deadline보다 작거나 같아도 별도 경고합니다. 경고에는 endpoint/key/raw 설정이 없으며 `gateway/app.env.example` 검토를 안내합니다. 설정을 자동으로 늘리지 않으므로 운영자가 비용·전체 run 예산까지 검토한 뒤 병합하세요.
 
 ### 토큰 차액과 선택적 가격
 
@@ -174,9 +178,17 @@ LLM_TOKEN_PRICES_JSON={"research-primary":{"input":2,"output":4},"research-secon
 
 단위는 USD / 백만 토큰입니다. 번들은 별칭마다 deployment가 하나이므로 각 항목이 해당 deployment의 단가입니다. 별칭 아래 여러 deployment/가격을 추가하는 확장은 현재 매핑의 범위 밖입니다. 각 별칭에 input/output 둘 다 필요하고 유한 비음수 숫자만 허용합니다. 0은 명시적인 무료 단가로만 인정하며 누락을 0으로 치환하지 않습니다. 직접 연결에는 별도로 `configured-model` 키를 사용합니다. 계산식은 `(input_tokens × input_rate + output_tokens × output_rate) / 1000000`. 예: input100/output50, 2/4 단가 → `$0.0004`; output50 안에 reasoning20이 보고되어도 추가하지 않습니다. fallback이면 **served secondary 단가**를 사용합니다. 캐시 할인/계층 요금/도구 비용/실패한 upstream 시도는 반영하지 않는 추정치이며, 제공자 청구액이나 모든 upstream 시도를 포함한 총 실제 실행 비용이 아닙니다. 단가 변경 시 앱을 재시작하세요. vLLM GPU 운영비를 API 토큰 단가처럼 꾸미지 마세요.
 
+### 선택적 미설명 차액 추정 (기본은 unknown)
+
+`LLM_RESIDUAL_PRICING=unknown`이 기본입니다. 단가를 설정했어도 양수 `total-input-output` 차액이 있으면 완전한 요청 비용은 unknown으로 유지됩니다. 필요한 세 count와 해당 served 단가가 유효하고 차액이 음수가 아닌 경우 타임라인의 `input_output_estimated_cost_usd`는 **입력·출력만의 소계, 차액 제외**를 보여 줍니다. 이는 실행 전체의 소계가 아닙니다.
+
+운영자가 제공자 계약을 검토한 뒤 `LLM_RESIDUAL_PRICING=output`으로 opt-in하면 양수 차액 × 설정된 output 단가를 더합니다. **차액이 reasoning이라고 단정하지 않는 가정**이며 `cost_assumption=residual_at_output_rate`와 UI 문구로 표시합니다. 직접 연결은 `configured-model`, gateway는 검증된 실제 served 별칭의 가격만 사용합니다. 알 수 없는 served 별칭을 요청 별칭 가격으로 대체하지 않습니다. 음수 차액, 누락/합성 zero usage, 미설정 단가, overflow는 unknown입니다. 명시적인 reasoning details는 output에 포함될 수 있으므로 절대 별도 가산하지 않습니다.
+
+`cost_summary.residual_priced_requests`는 이 가정을 쓴 요청 수입니다(없으면 0으로 해석). bounded 이벤트가 지워져도 서버가 요청 ID별로 보존하며 중복 완료 이벤트로 증가하지 않습니다. `complete` 추정도 청구액 확인을 의미하지 않습니다. 기본 unknown 경로의 입력·출력-only 소계는 run total에 완전한 요청 비용처럼 합산하지 않습니다.
+
 ### 실행별 추정 비용 합계
 
-Progress의 실행 추정 비용은 서버 snapshot의 `cost_summary`를 사용합니다. `model_call_id`별 최종 응답 추정을 한 번만 합산하며, 시작했지만 실패/취소/응답 미확인인 호출도 unknown 요청으로 셉니다. 전체 이벤트를 유지하거나 브라우저에서 재합산하지 않으므로 SSE 중복/재연결·이벤트150건 축약으로 중복 계산하거나 소계를 잃지 않습니다. 서버 재시작/기존 run 제거 후에는 유지되지 않습니다.
+Progress의 실행 추정 비용은 서버 snapshot의 `cost_summary`를 사용합니다. 새로고침/재연결 시 `GET /api/runs/{id}?include_events=true`가 최신 snapshot과 서버에 남은 bounded 이벤트를 함께 반환합니다. UI는 최대150건을 sequence ID로 중복 제거하고 최신 cursor 이후 SSE를 연결합니다. 비용은 재합산하지 않습니다. 전체 영구 이력은 아니며 누락 경고를 유지합니다. `model_call_id`별 최종 응답 추정을 한 번만 합산하며, 시작했지만 실패/취소/응답 미확인인 호출도 unknown 요청으로 셉니다. 전체 이벤트를 유지하거나 브라우저에서 재합산하지 않으므로 SSE 중복/재연결·이벤트150건 축약으로 중복 계산하거나 소계를 잃지 않습니다. 서버 재시작/기존 run 제거 후에는 유지되지 않습니다.
 
 - `model_requests`, `priced_requests`, `unknown_requests`: 앱 모델 요청 단위의 전체/추정 가능/미확인 개수. upstream fallback 시도 수가 아닙니다.
 - `known_estimated_cost_usd`: 알려진 요청의 소계, 알려진 값이 하나도 없으면 `null`입니다.

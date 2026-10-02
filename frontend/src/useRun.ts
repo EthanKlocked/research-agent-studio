@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { request } from "./api";
-import { acceptSnapshot, isComplete } from "./state";
+import { acceptSnapshot, isComplete, mergeEvents } from "./state";
 import type { RunEvent, Snapshot } from "./types";
 const storageKey = "research-studio.run-id";
 function remembered() {
@@ -39,6 +39,9 @@ export function useRun() {
       const accepted = acceptSnapshot(current.current, next);
       current.current = accepted;
       setSnapshot(accepted);
+      if (accepted && next.run_id === accepted.run_id && next.retained_events) {
+        setEvents(old => mergeEvents(old, next.retained_events ?? [], accepted));
+      }
       if (accepted && isComplete(accepted)) {
         stop();
         setDisconnected(false);
@@ -66,7 +69,7 @@ export function useRun() {
         retry.current = setTimeout(async () => {
           try {
             const fresh = await request<Snapshot>(
-              `/api/runs/${encodeURIComponent(id)}`,
+              `/api/runs/${encodeURIComponent(id)}?include_events=true`,
             );
             if (token !== generation.current) return;
             apply(fresh);
@@ -104,7 +107,7 @@ export function useRun() {
             event.data.snapshot.last_seq !== event.seq
           )
             return;
-          setEvents((old) => [...old, event].slice(-150));
+          setEvents((old) => mergeEvents(old, [event], event.data.snapshot));
           // Explicit terminal events also finalize older payloads without finished_at.
           apply(event.type === "terminal"
             ? { ...event.data.snapshot, finished_at: event.data.snapshot.finished_at ?? event.timestamp }
@@ -123,7 +126,7 @@ export function useRun() {
     const token = ++generation.current;
     if (id) {
       setPending(true);
-      request<Snapshot>(`/api/runs/${encodeURIComponent(id)}`)
+      request<Snapshot>(`/api/runs/${encodeURIComponent(id)}?include_events=true`)
         .then((s) => {
           if (token !== generation.current) return;
           current.current = null;
