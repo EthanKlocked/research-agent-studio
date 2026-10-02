@@ -10,6 +10,8 @@ const labels: Record<string, string> = {
 export function safeEvent(event: RunEvent) {
   if (!labels[event.type]) return '상태 갱신';
   const d = event.data;
+  const observation = event.type === 'model_complete' ? d.observation : undefined;
+  const served = observation?.served_by === 'research-primary' || observation?.served_by === 'research-secondary' ? observation.served_by : 'unknown';
   return [labels[event.type],
     d.purpose === 'planner_context' ? '계획 참고' : d.purpose === 'research_execution' ? '조사 실행' : null,
     typeof d.tool_count === 'number' ? `도구 ${d.tool_count}개` : null,
@@ -17,6 +19,7 @@ export function safeEvent(event: RunEvent) {
     d.tool_name || d.tool, d.input_summary,
     typeof d.count === 'number' ? `결과 ${d.count}건` : null,
     (d.state_fields || d.changed_fields)?.join(', '), d.reason,
+    observation ? `served_by: ${served} · fallback: ${typeof observation.fallback === 'boolean' ? String(observation.fallback) : 'unknown'}` : null,
     d.role, typeof d.attempt === 'number' ? `시도 ${d.attempt}` : null,
     typeof d.duration_ms === 'number' ? `${d.duration_ms}ms` : null,
     d.decision, d.retrieval_status === 'unavailable' ? '자료 이용 불가 · 인용 제외' : null,

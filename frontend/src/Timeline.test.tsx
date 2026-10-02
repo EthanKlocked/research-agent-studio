@@ -5,6 +5,20 @@ import { snapshot } from './test/fixtures';
 import type { RunEvent } from './types';
 const event = (seq: number, type: string, data: Record<string, unknown> = {}): RunEvent => ({seq, type, run_id: 'run-1', timestamp: `2026-01-01T00:00:0${seq}Z`, data: { snapshot: snapshot({ last_seq: seq, stage: 'Researcher' }), ...data }});
 describe('observable timeline', () => {
+  it.each([
+    [{served_by:'research-secondary',fallback:true}, 'served_by: research-secondary · fallback: true'],
+    [{served_by:'research-primary',fallback:false}, 'served_by: research-primary · fallback: false'],
+    [{served_by:null,fallback:null}, 'served_by: unknown · fallback: unknown'],
+    [{served_by:'private/raw-model',fallback:'yes'}, 'served_by: unknown · fallback: unknown'],
+  ])('shows observed routing without guessing from requested model', (observation, text) => {
+    render(<Timeline events={[event(1,'model_complete',{model_call_id:'m1',observation:{...observation,model:'research-primary',headers:{secret:'SECRET'}}})]} complete lastSeq={1}/>);
+    expect(screen.getByText(text,{exact:false})).toBeVisible();
+    expect(screen.queryByText(/private\/raw-model|SECRET/)).not.toBeInTheDocument();
+  });
+  it('leaves old events without observation backward compatible', () => {
+    render(<Timeline events={[event(1,'model_complete')]} complete lastSeq={1}/>);
+    expect(screen.queryByText(/served_by|fallback/)).not.toBeInTheDocument();
+  });
   it.each(['도구 입력을 확인하고 다시 조회해 주세요.', '자료 조회 중 오류가 발생했습니다.'])('does not infer an input error category from reason: %s', (reason) => {
     render(<Timeline events={[event(1, 'tool_error', {tool:'read_page', reason})]} complete={false} lastSeq={1}/>);
     expect(screen.getByText(`도구 오류 · read_page · ${reason}`)).toBeVisible();

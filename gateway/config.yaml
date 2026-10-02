@@ -1,31 +1,35 @@
 model_list:
   - model_name: research-primary
+    model_info:
+      id: "0101010101010101010101010101010101010101010101010101010101010101"
     litellm_params:
       model: os.environ/PRIMARY_MODEL
       api_base: os.environ/PRIMARY_BASE_URL
       api_key: os.environ/PRIMARY_API_KEY
-      timeout: 10
+      timeout: 60
       max_retries: 0
     rpm: 30
   - model_name: research-secondary
+    model_info:
+      id: "0202020202020202020202020202020202020202020202020202020202020202"
     litellm_params:
       model: os.environ/SECONDARY_MODEL
       api_base: os.environ/SECONDARY_BASE_URL
       api_key: os.environ/SECONDARY_API_KEY
-      timeout: 10
+      timeout: 60
       max_retries: 0
     rpm: 30
 router_settings:
   num_retries: 0
   max_fallbacks: 1
-  timeout: 25
+  timeout: 125
   disable_cooldowns: true
   fallbacks:
     - research-primary: [research-secondary]
   optional_pre_call_checks: [enforce_model_rate_limits]
 litellm_settings:
   num_retries: 0
-  request_timeout: 10
+  request_timeout: 60
   turn_off_message_logging: true
   telemetry: false
 general_settings:

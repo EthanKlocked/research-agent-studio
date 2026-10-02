@@ -87,6 +87,10 @@ export interface RunEvent {
     branch?: string;
     role?: Stage;
     model_call_id?: string;
+    observation?: {
+      served_by?: "research-primary" | "research-secondary" | null;
+      fallback?: boolean | null;
+    };
     purpose?: "planner_context" | "research_execution";
     tool_count?: number;
     scope?: "output_schema" | "citations";

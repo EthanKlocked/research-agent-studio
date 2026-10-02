@@ -81,7 +81,14 @@ async def test_repair_progress_tracks_actual_calls_not_scheduled_work(monkeypatc
     assert [k for k,d in events] == ['model_start','model_complete','validation_start','validation_error','repair_start','model_start','model_complete','validation_start','validation_complete']
     assert len(requests)==2
     assert [d['attempt'] for k,d in events if k=='model_start']==[1,2]
-    assert all(set(d) <= {'role', 'attempt', 'scope', 'model_call_id'} for k,d in events)
+    assert all(set(d) <= {'role', 'attempt', 'scope', 'model_call_id', 'observation'} for k,d in events)
+    observations = [d['observation'] for k,d in events if k == 'model_complete']
+    assert len(observations) == 2
+    assert all(o['served_by'] is None and o['fallback'] is None for o in observations)
+    assert all(set(o) == {'run_id', 'role', 'model_call_id', 'model', 'gateway_call_id', 'gateway_model_id',
+                           'served_by', 'fallback', 'status', 'latency_ms', 'input_tokens', 'output_tokens',
+                           'total_tokens', 'reasoning_tokens', 'unexplained_token_residual', 'usage_source',
+                           'estimated_cost_usd', 'billing_cost_usd'} for o in observations)
 
 
 async def test_provider_failure_has_no_completion_validation_or_repair(monkeypatch):

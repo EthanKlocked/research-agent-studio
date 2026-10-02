@@ -144,6 +144,7 @@ class RoleRunner:
             call_id = uuid4().hex
             await progress("model_start", model_call_id=call_id)
             started, response, status = monotonic(), None, "error"
+            observation = None
             try:
                 response = await handler(request)
                 status = "success"
@@ -155,10 +156,10 @@ class RoleRunner:
                 raise
             finally:
                 if self.factory.mode != "test":
-                    record_model_call(run_id=state.get("run_id"), role=role,
+                    observation = record_model_call(run_id=state.get("run_id"), role=role,
                                       call_id=call_id, model=self.settings.model,
-                                      started=started, status=status, response=response)
-            await progress("model_complete", model_call_id=call_id)
+                                      started=started, status=status, response=response, settings=self.settings)
+            await progress("model_complete", model_call_id=call_id, **({"observation": observation} if observation is not None else {}))
             return response
 
         try:

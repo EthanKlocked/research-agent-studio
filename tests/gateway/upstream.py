@@ -76,6 +76,10 @@ class Handler(BaseHTTPRequestHandler):
         result = {"id": "mock-completion", "object": "chat.completion", "created": 0, "model": model, "choices": [{"index": 0, "message": message, "finish_reason": "tool_calls" if message.get("tool_calls") else "stop"}]}
         if scenario != "no-usage":
             result["usage"] = {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+            if scenario == "reasoning":
+                result["usage"]["completion_tokens_details"] = {"reasoning_tokens": 3}
+            elif scenario == "residual":
+                result["usage"]["total_tokens"] = 22
         self.reply(200, result)
 
 
