@@ -244,21 +244,41 @@ def wait_healthy(stack):
 
 
 def test_real_rpm_limiter_rejects_before_upstream(stack):
-    control(stack, "normal")
-    # Restart clears per-process counters; measure the exact threshold.
-    stack[3]("restart", "gateway")
-    wait_healthy(stack)
-    statuses = []
-    for _ in range(31):
-        before = len(attempts(stack))
-        response = completion(stack, "research-secondary")
-        statuses.append(response.status_code)
-        if response.status_code == 429:
-            assert len(attempts(stack)) == before
-            break
-        assert response.status_code == 200, response.text
+    from rpm_window import in_fresh_minute
+
+    def prepare():
+        # Every measurement gets fresh process counters and upstream history.
+        stack[3]("restart", "gateway")
+        wait_healthy(stack)
+        control(stack, "normal")
+
+    def gateway_utc():
+        # Pinned Router uses get_utc_datetime().strftime('%H-%M') keys.
+        # Read inside that container: host/Docker clocks need not agree.
+        return float(stack[3]("exec", "-T", "gateway", "python", "-c",
+                             "from datetime import datetime, timezone; "
+                             "print(datetime.now(timezone.utc).timestamp())"))
+
+    def burst():
+        statuses = []
+        for _ in range(31):
+            before = len(attempts(stack))
+            response = completion(stack, "research-secondary")
+            statuses.append(response.status_code)
+            if response.status_code == 429:
+                # Rollover can delay rejection, never justify an early one.
+                assert len(statuses) == 31, "Limiter rejected before request 31"
+                assert len(attempts(stack)) == before
+                break
+            assert response.status_code == 200, response.text
+        return statuses, len(attempts(stack))
+
+    statuses, upstream_count = in_fresh_minute(
+        prepare=prepare, now=gateway_utc, sleep=time.sleep, burst=burst,
+    )
+    # A same-window mismatch fails immediately, never 'eventually 429'.
     assert statuses == [200] * 30 + [429]
-    assert len(attempts(stack)) == 30
+    assert upstream_count == 30
 
 
 def test_proxy_logs_do_not_echo_upstream_error(stack):

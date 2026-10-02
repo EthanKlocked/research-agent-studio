@@ -39,4 +39,21 @@ Browser fixture QA: `frontend/qa/gateway-browser.js`, production build served on
 - RPM test resets the proxy process and proves exactly30 accepted,31st rejected without upstream arrival. Log-redaction test creates its own primary failure/fallback even when selected independently.
 - Pinned image availability is a hard preflight failure with an exact pull command, not a silent skip. Normal non-opt-in pytest skips are not gateway verification.
 
-No paid calls, model-quality evaluation, real cost verification, current Windows/amd64 validation, host infrastructure changes or merge are included. Independent review remains required.
+## Independent-review RPM regression and re-verification
+
+The independent review of `23f5733d62938ad37ff12bf669e4be308cc92994` ran the full suite and observed **547 passed, 1 failed**: request31 returned200 instead of429. The isolated RPM test passed. Preserve that failure alongside the earlier548-pass run above; the earlier run did not establish boundary safety. Minute rollover was supported by source inspection, but timestamps were not captured during the original failing review, so it is not a directly measured cause of that failure.
+
+Re-inspected the pinned image's installed source: `router.py:8060,8230,10983` and `router_strategy/lowest_tpm_rpm_v2.py:75,153,234,272,430,547` use `get_utc_datetime().strftime("%H-%M")` for fixed-minute counters, not a rolling60-second interval. The inspection container had `--network none` and was removed automatically; package import attempted a model-price metadata fetch, which failed with DNS unavailable and used its bundled fallback. No live provider request was made.
+
+The test-only fix reads UTC timestamps **inside the gateway container** before and after each burst. Each measurement restarts the proxy, refreshes its published port, resets mock history, and waits until the first10seconds of a minute. It accepts evidence only when both timestamps are in the same UTC minute. At most one retry is allowed, only after an observed forward minute crossing, with fresh counters again. Early429, unexpected statuses, an upstream arrival for429, backwards time, and same-window threshold mismatches fail rather than retry. Waiting and rollover retries are bounded; there is no skip or eventual429 relaxation.
+
+Six deterministic helper regressions first failed against the unimplemented helper (**6 failed in0.04s**), then passed: early-window waiting, returning a same-window all200 result without retry, observed rollover/reset, exhausted rollover budget, immediate burst failure, bounded waiting, and backwards-clock rejection (waiting/result checks share one test).
+
+| Re-verification command | Observed result |
+|---|---|
+| `RAS_GATEWAY_TEST=1 PYTHON_DOTENV_DISABLED=1 uv run --locked --extra dev python -m pytest tests/gateway/test_rpm_window.py tests/gateway/test_proxy.py -k 'rpm or window' -q --tb=short -s` | **7 passed,16 deselected in44.85s** |
+| `RAS_GATEWAY_TEST=1 PYTHON_DOTENV_DISABLED=1 uv run --locked --extra dev python -m pytest tests -q --tb=short` | **554 passed in218.31s**, no skips |
+
+The focused real-proxy run directly observed gateway UTC `2026-10-02T06:12:01.450272+00:00` through `2026-10-02T06:12:03.859548+00:00`: exactly30 responses200, request31 response429, and exactly30 upstream arrivals, all within one accounting minute. No rollover retry was needed in that measured run. These timestamps are observed test evidence, not a correction to other workflow dates. Frontend and application code are unchanged; frontend checks were not rerun for this test-only fix. Post-suite Docker read-back (`docker ps -a --filter name=ras-gateway` and `docker network ls --filter name=ras-gateway`) found no task containers or networks; `git diff --check` passed.
+
+No paid calls, model-quality evaluation, real cost verification, current Windows/amd64 validation, host infrastructure changes or merge are included. Independent re-review remains required.
